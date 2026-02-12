@@ -1,0 +1,12 @@
+{
+  "name": "dads-after-dark-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lightweight podcast website for 3 Dads After Dark",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
