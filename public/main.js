@@ -23,8 +23,24 @@ function dismissSplash() {
 }
 
 if (enterButton) {
-  const lockMs = 4500;
+  const lockMs = 6200;
   const startMs = Date.now();
+
+  const statusForProgress = (progress) => {
+    if (progress < 0.2) {
+      return 'Opening portal...';
+    }
+    if (progress < 0.45) {
+      return 'Agents going undercover...';
+    }
+    if (progress < 0.7) {
+      return 'Abduction beam charging...';
+    }
+    if (progress < 1) {
+      return 'Neon signal syncing...';
+    }
+    return 'Drop is live. Enter when ready.';
+  };
 
   const tick = () => {
     const elapsed = Date.now() - startMs;
@@ -34,19 +50,17 @@ if (enterButton) {
       splashMeterBar.style.transform = `scaleX(${progress})`;
     }
 
+    if (splashStatus) {
+      splashStatus.textContent = statusForProgress(progress);
+    }
+
     if (progress < 1) {
-      if (splashStatus) {
-        splashStatus.textContent = 'Stabilizing transmission...';
-      }
       window.requestAnimationFrame(tick);
       return;
     }
 
     enterButton.disabled = false;
-    enterButton.textContent = 'Enter Experience';
-    if (splashStatus) {
-      splashStatus.textContent = 'Signal stable. Enter when ready.';
-    }
+    enterButton.textContent = 'Enter The Drop';
   };
 
   enterButton.textContent = 'Calibrating...';
