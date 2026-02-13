@@ -7,11 +7,11 @@
       name="description"
       content="3 Dads After Dark is the unfiltered late-night dad podcast packed with stories, laughs, and real talk."
     />
-    <title>3 Dads After Dark | Night Transmission</title>
+    <title>3 Dads After Dark | Late-Night Signal</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Antonio:wght@300;400;500;600;700&family=Syne:wght@500;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=Urbanist:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
@@ -31,142 +31,180 @@
     </noscript>
   </head>
   <body class="prelaunch">
-    <div class="sky-layer stars-a" aria-hidden="true"></div>
-    <div class="sky-layer stars-b" aria-hidden="true"></div>
-    <div class="nebula nebula-a" aria-hidden="true"></div>
-    <div class="nebula nebula-b" aria-hidden="true"></div>
-    <div class="scanlines" aria-hidden="true"></div>
+    <div class="bg-stars" aria-hidden="true"></div>
+    <div class="bg-nebula nebula-one" aria-hidden="true"></div>
+    <div class="bg-nebula nebula-two" aria-hidden="true"></div>
+    <div class="bg-grain" aria-hidden="true"></div>
 
-    <section id="splash" class="splash" aria-label="Intro splash">
-      <div class="splash-ufo" aria-hidden="true">
-        <div class="ufo-dome"></div>
-        <div class="ufo-ring"></div>
+    <section id="splash" class="splash" aria-label="Intro experience">
+      <div class="ufo" aria-hidden="true">
+        <div class="ufo-top"></div>
+        <div class="ufo-core"></div>
         <div class="ufo-lights"></div>
       </div>
-      <div class="tractor-beam" aria-hidden="true"></div>
-      <div class="beam-target" aria-hidden="true">
+      <div class="beam" aria-hidden="true"></div>
+      <div class="beam-rings" aria-hidden="true">
         <span></span>
         <span></span>
         <span></span>
       </div>
 
-      <div class="splash-content">
-        <p class="label">incoming signal</p>
+      <div class="splash-card">
+        <p class="eyebrow">signal lock sequence</p>
         <h1>3 DADS AFTER DARK</h1>
         <p>
-          Abducting boring conversations and replacing them with raw dad stories, wild laughs,
-          and late-night truth.
+          Real dad life, after-hours energy, no fake filters. Stay in the beam for a second.
         </p>
+        <div class="splash-meter" role="presentation">
+          <span id="splash-meter-bar"></span>
+        </div>
+        <p class="splash-status" id="splash-status">Stabilizing transmission...</p>
         <div class="splash-actions">
-          <button id="enter-experience" class="btn btn-primary" type="button">Enter The Broadcast</button>
+          <button id="enter-experience" class="btn btn-primary" type="button" disabled>
+            Enter Experience
+          </button>
           <a id="skip-intro" class="btn btn-ghost" href="#main-content">Skip Intro</a>
         </div>
       </div>
     </section>
 
     <div id="main-content" class="site-shell">
-      <header class="mast reveal" id="home">
-        <a class="logo" href="#home" aria-label="3 Dads After Dark home">
-          <span class="logo-mark">3D</span>
-          <span class="logo-text">Dads After Dark</span>
+      <header class="topbar reveal">
+        <a class="brand" href="#main-content" aria-label="3 Dads After Dark home">
+          <span class="brand-mark">3D</span>
+          <span class="brand-text">Dads After Dark</span>
         </a>
         <nav aria-label="Primary navigation">
           <a href="#episodes">Episodes</a>
-          <a href="#cosmos">Why Us</a>
-          <a href="#contact">Book Us</a>
+          <a href="#sponsors">Sponsors</a>
+          <a href="#lead">Book Us</a>
         </nav>
+        <a class="btn btn-mini" href="#lead">Sponsor Inquiry</a>
       </header>
 
       <main>
         <section class="hero panel reveal">
-          <p class="label">weekly transmissions</p>
-          <h2>
-            THE MOST <span>UNFILTERED</span><br />DAD PODCAST ON YOUR FEED
-          </h2>
-          <p class="hero-copy">
-            Three dads. No scripts. No fake polish. Just honest stories about family, chaos,
-            marriage, mistakes, and moments that actually matter.
-          </p>
-          <div class="hero-actions">
-            <a class="btn btn-primary" href="https://www.youtube.com/@3dadsafterdark/videos" target="_blank" rel="noreferrer">
-              Watch Latest Episodes
-            </a>
-            <a class="btn btn-ghost" href="https://www.youtube.com/@3dadsafterdark?sub_confirmation=1" target="_blank" rel="noreferrer">
-              Subscribe on YouTube
-            </a>
+          <div class="hero-left">
+            <p class="eyebrow">weekly late-night podcast</p>
+            <h2>THE REAL DAD CONVERSATION YOUR AUDIENCE WILL ACTUALLY FEEL</h2>
+            <p>
+              3 dads bringing humor, family chaos, culture takes, and honest life talk that keeps
+              listeners coming back.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="https://www.youtube.com/@3dadsafterdark/videos" target="_blank" rel="noreferrer">
+                Watch Latest Episodes
+              </a>
+              <a class="btn btn-ghost" href="https://www.youtube.com/@3dadsafterdark?sub_confirmation=1" target="_blank" rel="noreferrer">
+                Subscribe on YouTube
+              </a>
+            </div>
+            <ul class="hero-tags" aria-label="Podcast topics">
+              <li>Parenting</li>
+              <li>Marriage</li>
+              <li>Sports + Culture</li>
+              <li>Late-Night Humor</li>
+            </ul>
           </div>
-          <ul class="hero-pills" aria-label="Podcast themes">
-            <li>Dad Wins + Fails</li>
-            <li>Marriage + Family Talks</li>
-            <li>Late-Night Comedy Energy</li>
-            <li>Relatable Real-Life Stories</li>
-          </ul>
+          <aside class="hero-right">
+            <p class="mini-title">For Brands + Guests</p>
+            <h3>Want your message in front of real parents?</h3>
+            <p>
+              Sponsorships, collabs, and guest features. If the fit is right, we move fast.
+            </p>
+            <a class="btn btn-primary" href="#lead">Start A Partnership</a>
+          </aside>
+        </section>
+
+        <section id="sponsors" class="panel reveal">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">why partner with us</p>
+              <h3>Lead-Ready Audience Trust</h3>
+            </div>
+          </div>
+
+          <div class="benefits-grid">
+            <article>
+              <h4>Authentic Host Reads</h4>
+              <p>Your offer is delivered in real conversation, not forced ad language.</p>
+            </article>
+            <article>
+              <h4>Cross-Format Exposure</h4>
+              <p>Full episodes, livestreams, and short clips drive repeated brand visibility.</p>
+            </article>
+            <article>
+              <h4>Community-Fit Focus</h4>
+              <p>We only promote products that match family, lifestyle, and dad-life audiences.</p>
+            </article>
+          </div>
         </section>
 
         <section id="episodes" class="panel reveal">
-          <div class="title-row">
+          <div class="section-head">
             <div>
-              <p class="label">episode vault</p>
-              <h3>Pick Your Signal</h3>
+              <p class="eyebrow">episode hub</p>
+              <h3>Pick Your Format</h3>
             </div>
-            <a class="micro-link" href="https://www.youtube.com/@3dadsafterdark" target="_blank" rel="noreferrer">Open Channel</a>
+            <a class="text-link" href="https://www.youtube.com/@3dadsafterdark" target="_blank" rel="noreferrer">Open Full Channel</a>
           </div>
 
           <div class="episode-grid">
             <article class="episode-card">
               <h4>Full Episodes</h4>
-              <p>Deep conversations, guests, and complete stories from the dads.</p>
-              <a href="https://www.youtube.com/@3dadsafterdark/videos" target="_blank" rel="noreferrer">Watch full episodes</a>
+              <p>Deep conversations, stories, and takes from all three hosts.</p>
+              <a href="https://www.youtube.com/@3dadsafterdark/videos" target="_blank" rel="noreferrer">Watch episodes</a>
             </article>
             <article class="episode-card">
-              <h4>Shorts</h4>
-              <p>Best clips, funniest moments, and quick takes when time is tight.</p>
+              <h4>Short Clips</h4>
+              <p>Fast moments and punchy highlights made for quick consumption.</p>
               <a href="https://www.youtube.com/@3dadsafterdark/shorts" target="_blank" rel="noreferrer">Watch shorts</a>
             </article>
             <article class="episode-card">
               <h4>Live Streams</h4>
-              <p>Real-time shows and community hangouts with zero filter.</p>
-              <a href="https://www.youtube.com/@3dadsafterdark/streams" target="_blank" rel="noreferrer">Join live streams</a>
+              <p>Real-time reactions and direct audience interaction.</p>
+              <a href="https://www.youtube.com/@3dadsafterdark/streams" target="_blank" rel="noreferrer">Join live</a>
             </article>
           </div>
         </section>
 
-        <section id="cosmos" class="panel split reveal">
-          <div>
-            <p class="label">from the mothership</p>
-            <h3>Why listeners keep coming back</h3>
-            <p>
-              This show sounds like the group chat after the kids go to bed: funny, chaotic,
-              honest, and unexpectedly deep. It is real life with a mic and no pretending.
-            </p>
-          </div>
-
-          <div class="signal-grid">
-            <article>
-              <span>01</span>
-              <h4>No fake personas</h4>
-              <p>What you hear is what real dad life sounds like.</p>
-            </article>
-            <article>
-              <span>02</span>
-              <h4>Strong chemistry</h4>
-              <p>Three distinct voices, one authentic vibe.</p>
-            </article>
-            <article>
-              <span>03</span>
-              <h4>Actually useful laughs</h4>
-              <p>Entertainment plus perspective you can take into your week.</p>
-            </article>
-          </div>
-        </section>
-
-        <section id="contact" class="panel cta reveal">
-          <p class="label">collab + sponsors</p>
-          <h3>Bring 3 Dads After Dark to your audience</h3>
-          <p>
-            Brand deal, guest appearance, or partnership idea. If it matches the vibe, let us talk.
+        <section id="lead" class="panel lead-panel reveal">
+          <p class="eyebrow">book a conversation</p>
+          <h3>Partnership + Guest Intake</h3>
+          <p class="lead-copy">
+            Fill this out and we will follow up directly. No database used on-site; submissions open
+            directly to email.
           </p>
-          <a class="btn btn-primary" href="mailto:hello@3dadsafterdark.com?subject=3%20Dads%20After%20Dark%20Partnership">Email the show</a>
+
+          <form id="lead-form" class="lead-form" novalidate>
+            <label>
+              Name
+              <input type="text" name="name" placeholder="Your name" required />
+            </label>
+            <label>
+              Email
+              <input type="email" name="email" placeholder="you@company.com" required />
+            </label>
+            <label>
+              Company / Brand
+              <input type="text" name="company" placeholder="Brand or organization" />
+            </label>
+            <label>
+              Interested In
+              <select name="interest" required>
+                <option value="" selected disabled>Select one</option>
+                <option value="Sponsorship">Sponsorship</option>
+                <option value="Guest Appearance">Guest Appearance</option>
+                <option value="Brand Collaboration">Brand Collaboration</option>
+              </select>
+            </label>
+            <label class="full">
+              Message
+              <textarea name="message" rows="5" placeholder="Tell us your goal and timeline" required></textarea>
+            </label>
+            <button class="btn btn-primary" type="submit">Send Inquiry</button>
+            <p class="form-note" id="form-note" role="status" aria-live="polite"></p>
+          </form>
         </section>
       </main>
 

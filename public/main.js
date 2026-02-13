@@ -3,34 +3,15 @@ if (yearNode) {
   yearNode.textContent = String(new Date().getFullYear());
 }
 
-const storageKey = 'dadAfterDarkIntroSeen';
 const splash = document.getElementById('splash');
 const enterButton = document.getElementById('enter-experience');
 const skipIntro = document.getElementById('skip-intro');
+const splashStatus = document.getElementById('splash-status');
+const splashMeterBar = document.getElementById('splash-meter-bar');
 
-function setIntroSeen() {
-  try {
-    localStorage.setItem(storageKey, '1');
-  } catch {
-    // Ignore storage errors in restricted browsing contexts.
-  }
-}
-
-function hasSeenIntro() {
-  try {
-    return localStorage.getItem(storageKey) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function dismissSplash(persist) {
+function dismissSplash() {
   if (!splash || splash.classList.contains('dismissed')) {
     return;
-  }
-
-  if (persist) {
-    setIntroSeen();
   }
 
   document.body.classList.remove('prelaunch');
@@ -38,23 +19,48 @@ function dismissSplash(persist) {
 
   window.setTimeout(() => {
     splash.remove();
-  }, 850);
-}
-
-if (hasSeenIntro()) {
-  dismissSplash(false);
+  }, 1000);
 }
 
 if (enterButton) {
+  const lockMs = 4500;
+  const startMs = Date.now();
+
+  const tick = () => {
+    const elapsed = Date.now() - startMs;
+    const progress = Math.min(1, elapsed / lockMs);
+
+    if (splashMeterBar) {
+      splashMeterBar.style.transform = `scaleX(${progress})`;
+    }
+
+    if (progress < 1) {
+      if (splashStatus) {
+        splashStatus.textContent = 'Stabilizing transmission...';
+      }
+      window.requestAnimationFrame(tick);
+      return;
+    }
+
+    enterButton.disabled = false;
+    enterButton.textContent = 'Enter Experience';
+    if (splashStatus) {
+      splashStatus.textContent = 'Signal stable. Enter when ready.';
+    }
+  };
+
+  enterButton.textContent = 'Calibrating...';
+  tick();
+
   enterButton.addEventListener('click', () => {
-    dismissSplash(true);
+    dismissSplash();
   });
 }
 
 if (skipIntro) {
   skipIntro.addEventListener('click', (event) => {
     event.preventDefault();
-    dismissSplash(true);
+    dismissSplash();
     const main = document.getElementById('main-content');
     if (main) {
       main.scrollIntoView({ behavior: 'smooth' });
@@ -64,7 +70,7 @@ if (skipIntro) {
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
-    dismissSplash(true);
+    dismissSplash();
   }
 });
 
@@ -79,8 +85,50 @@ const observer = new IntersectionObserver(
     });
   },
   {
-    threshold: 0.2
+    threshold: 0.15
   }
 );
 
 revealNodes.forEach((node) => observer.observe(node));
+
+const leadForm = document.getElementById('lead-form');
+const formNote = document.getElementById('form-note');
+
+if (leadForm) {
+  leadForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+
+    const data = new FormData(leadForm);
+    const name = String(data.get('name') || '').trim();
+    const email = String(data.get('email') || '').trim();
+    const company = String(data.get('company') || '').trim();
+    const interest = String(data.get('interest') || '').trim();
+    const message = String(data.get('message') || '').trim();
+
+    if (!name || !email || !interest || !message) {
+      if (formNote) {
+        formNote.textContent = 'Please complete all required fields.';
+      }
+      return;
+    }
+
+    const subject = encodeURIComponent(`3 Dads After Dark Inquiry: ${interest}`);
+    const body = encodeURIComponent(
+      [
+        `Name: ${name}`,
+        `Email: ${email}`,
+        `Company: ${company || 'N/A'}`,
+        `Interest: ${interest}`,
+        '',
+        'Message:',
+        message
+      ].join('\n')
+    );
+
+    window.location.href = `mailto:hello@3dadsafterdark.com?subject=${subject}&body=${body}`;
+
+    if (formNote) {
+      formNote.textContent = 'Your email app should open now to send the inquiry.';
+    }
+  });
+}
