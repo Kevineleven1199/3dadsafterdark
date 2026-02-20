@@ -5,182 +5,279 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="3 Dads After Dark - premium podcast site with latest episodes, fan club callouts, and sponsor lead capture."
+      content="SignalScope is a multi-tenant community platform where internet sleuths collaborate around videos, podcasts, memes, and emerging online mysteries."
     />
-    <title>3 Dads After Dark</title>
+    <title>SignalScope | Collaborative Media Investigations</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&family=Nunito+Sans:wght@400;600;700;800&family=Raleway:wght@700;800;900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700;9..144,800&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="site-header">
-      <div class="container top-row">
-        <a class="brand" href="#top" aria-label="3 Dads After Dark home">
-          <span class="brand-mark">3D</span>
+    <header class="top-bar">
+      <div class="top-shell">
+        <a class="brand" href="#top" aria-label="SignalScope home">
+          <span class="brand-token">SS</span>
           <span class="brand-copy">
-            <strong>Dads After Dark</strong>
-            <small>Be weird. Be real. Stay loud.</small>
+            <strong>SignalScope</strong>
+            <small>Community intelligence network</small>
           </span>
         </a>
 
-        <nav aria-label="Primary navigation">
-          <a href="#episodes">Episodes</a>
-          <a href="#extras">Extras</a>
-          <a href="#lead">Suggest A Collab</a>
-          <a href="https://www.youtube.com/@3dadsafterdark" target="_blank" rel="noreferrer">Merch + Links</a>
-          <a href="#newsletter">Newsletter</a>
+        <nav class="primary-nav" aria-label="Primary">
+          <a href="#case-feed">Case Feed</a>
+          <a href="#composer">Drop A Lead</a>
+          <a href="#caseboard">Caseboard</a>
+          <a href="#rooms">War Rooms</a>
         </nav>
 
-        <a class="btn btn-solid" href="https://www.youtube.com/@3dadsafterdark?sub_confirmation=1" target="_blank" rel="noreferrer">Join The Club</a>
+        <div class="header-controls">
+          <label for="tenant-select" class="field-label">Tenant</label>
+          <select id="tenant-select" aria-label="Select community tenant"></select>
+          <div class="auth-shell">
+            <span id="auth-user">Guest mode</span>
+            <button type="button" id="logout-btn" class="btn btn-quiet" hidden>Log out</button>
+          </div>
+        </div>
       </div>
     </header>
 
-    <main id="top">
-      <section class="hero container reveal">
-        <div class="hero-panel hero-main">
-          <p class="kicker">NEW EPISODES WEEKLY</p>
-          <h1>3 DADS AFTER DARK</h1>
-          <p>
-            The late-night podcast for parents and culture junkies who want honest takes, funny
-            chaos, and stories that sound like real life.
-          </p>
-          <div class="hero-actions">
-            <a class="btn btn-solid" href="https://www.youtube.com/@3dadsafterdark/videos" target="_blank" rel="noreferrer">Latest Episodes</a>
-            <a class="btn btn-outline" href="#episodes">Browse Archive</a>
-          </div>
-        </div>
+    <main id="top" class="layout">
+      <aside class="rail left-rail reveal-block">
+        <section class="panel" id="auth-panel">
+          <p class="kicker">Identity</p>
+          <h2>Access Node</h2>
 
-        <aside class="hero-panel hero-side" id="newsletter">
-          <p class="kicker">DADS AFTER DARK MEMBERS ONLY</p>
-          <h2>Want Bonus Drops + Behind-The-Scenes Clips?</h2>
-          <p>
-            Get first access to episode drops, live stream alerts, and private updates from the show.
-          </p>
-          <a class="btn btn-solid" href="https://www.youtube.com/@3dadsafterdark?sub_confirmation=1" target="_blank" rel="noreferrer">Subscribe Free</a>
-        </aside>
-      </section>
+          <form id="login-form" class="stack-form" novalidate>
+            <label>
+              Email
+              <input type="email" name="email" placeholder="you@example.com" required />
+            </label>
+            <label>
+              Password
+              <input type="password" name="password" placeholder="At least 6 characters" required />
+            </label>
+            <button type="submit" class="btn btn-primary">Log In</button>
+          </form>
 
-      <section id="episodes" class="container section reveal">
-        <div class="section-head">
-          <h2>Latest Episodes</h2>
-          <a href="https://www.youtube.com/@3dadsafterdark/videos" target="_blank" rel="noreferrer">View all</a>
-        </div>
-
-        <div class="episode-grid">
-          <article class="episode-card">
-            <p class="episode-tag">LIVE</p>
-            <h3>Live Reaction Eagles Chargers gamecast</h3>
-            <p>Real-time reactions, unfiltered talk, and instant fan energy.</p>
-            <a href="https://www.youtube.com/watch?v=3CgdIcNsDQw" target="_blank" rel="noreferrer">Read more</a>
-          </article>
-          <article class="episode-card">
-            <p class="episode-tag">LIVE</p>
-            <h3>Dads After Dark Show Live Stream</h3>
-            <p>Late-night stream mode with pure off-the-cuff conversation.</p>
-            <a href="https://www.youtube.com/watch?v=ilmsELr6q-Y" target="_blank" rel="noreferrer">Read more</a>
-          </article>
-          <article class="episode-card">
-            <p class="episode-tag">EPISODE</p>
-            <h3>August 11, 2025</h3>
-            <p>Dad-life stories, opinions, and laughs from the full crew.</p>
-            <a href="https://www.youtube.com/watch?v=Tk6dJStYung" target="_blank" rel="noreferrer">Read more</a>
-          </article>
-          <article class="episode-card">
-            <p class="episode-tag">EPISODE</p>
-            <h3>Ep 9 Moneyline</h3>
-            <p>Sports betting talk, quick picks, and hot takes from the dads.</p>
-            <a href="https://www.youtube.com/watch?v=iD-_XfpV3ik" target="_blank" rel="noreferrer">Read more</a>
-          </article>
-          <article class="episode-card">
-            <p class="episode-tag">EPISODE</p>
-            <h3>Ep 8 Atlantis' Fate</h3>
-            <p>Conspiracy vibes and deep conversation with signature humor.</p>
-            <a href="https://www.youtube.com/watch?v=ubSA-xJfNUI" target="_blank" rel="noreferrer">Read more</a>
-          </article>
-          <article class="episode-card">
-            <p class="episode-tag">EPISODE</p>
-            <h3>Ep 7 AI Heaven Chat GPT</h3>
-            <p>AI, future tech, and dad perspectives mixed with comedy.</p>
-            <a href="https://www.youtube.com/watch?v=9SEulgwQPZM" target="_blank" rel="noreferrer">Read more</a>
-          </article>
-        </div>
-      </section>
-
-      <section id="extras" class="container section reveal">
-        <div class="extras-grid">
-          <article>
-            <h3>Suggest A Topic</h3>
-            <p>Have a case, story, or hot topic the dads should cover next?</p>
-            <a href="#lead">Send your idea</a>
-          </article>
-          <article>
-            <h3>Share The Good</h3>
-            <p>Tell us wins, lessons, and stories from your own dad journey.</p>
-            <a href="#lead">Submit a story</a>
-          </article>
-          <article>
-            <h3>Fan Art + Clips</h3>
-            <p>Drop fan art, memes, or edits and we may feature them in the show.</p>
-            <a href="#lead">Send content</a>
-          </article>
-        </div>
-      </section>
-
-      <section id="lead" class="container section reveal">
-        <div class="lead-shell">
-          <div>
-            <p class="kicker">PARTNER WITH THE SHOW</p>
-            <h2>Brand + Guest Inquiries</h2>
-            <p>
-              Sponsorships, guest appearances, and collaborations. No database on-site; this form opens
-              your mail app with a prefilled message.
-            </p>
-          </div>
-
-          <form id="lead-form" class="lead-form" novalidate>
+          <form id="register-form" class="stack-form compact" novalidate>
             <label>
               Name
-              <input type="text" name="name" placeholder="Your name" required />
+              <input type="text" name="name" placeholder="Display name" required />
             </label>
             <label>
               Email
-              <input type="email" name="email" placeholder="you@company.com" required />
+              <input type="email" name="email" placeholder="you@example.com" required />
             </label>
             <label>
-              Company / Brand
-              <input type="text" name="company" placeholder="Brand or organization" />
+              Password
+              <input type="password" name="password" placeholder="Create password" required />
+            </label>
+            <button type="submit" class="btn btn-outline">Create Account</button>
+          </form>
+
+          <p class="tiny-note">Demo login: <code>demo@signalscope.local</code> / <code>demo1234</code></p>
+          <p id="auth-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="panel">
+          <p class="kicker">Tenant Directory</p>
+          <h2>Community Hubs</h2>
+          <div id="tenant-list" class="tenant-list" role="list"></div>
+        </section>
+
+        <section class="panel" id="tenant-panel">
+          <p class="kicker">Launch Tenant</p>
+          <h2>Create Community</h2>
+          <form id="tenant-form" class="stack-form compact" novalidate>
+            <label>
+              Tenant Name
+              <input type="text" name="name" placeholder="Name your community" required />
             </label>
             <label>
-              Interested In
-              <select name="interest" required>
-                <option value="" selected disabled>Select one</option>
-                <option value="Sponsorship">Sponsorship</option>
-                <option value="Guest Appearance">Guest Appearance</option>
-                <option value="Brand Collaboration">Brand Collaboration</option>
+              Tagline
+              <input type="text" name="tagline" placeholder="One-line mission" required />
+            </label>
+            <label>
+              Description
+              <textarea
+                name="description"
+                rows="3"
+                placeholder="What are members investigating here?"
+                required
+              ></textarea>
+            </label>
+            <button type="submit" class="btn btn-outline">Create Tenant</button>
+          </form>
+          <p id="tenant-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="panel">
+          <p class="kicker">Current Channels</p>
+          <h2>Investigation Lanes</h2>
+          <ul id="channel-list" class="channel-list"></ul>
+        </section>
+
+        <section class="panel">
+          <p class="kicker">Signal Protocol</p>
+          <ul class="rules-list">
+            <li>Always link source material.</li>
+            <li>Separate facts from speculation.</li>
+            <li>Summarize findings before escalation.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <section class="core-column">
+        <section class="hero panel reveal-block">
+          <p class="kicker">Multi-tenant internet investigation platform</p>
+          <h1 id="hero-title"></h1>
+          <p id="hero-description" class="hero-description"></p>
+
+          <div class="hero-stats">
+            <article>
+              <p class="stat-label">Members</p>
+              <p id="stat-members" class="stat-value"></p>
+            </article>
+            <article>
+              <p class="stat-label">Active Watchers</p>
+              <p id="stat-active" class="stat-value"></p>
+            </article>
+            <article>
+              <p class="stat-label">Open Cases</p>
+              <p id="stat-cases" class="stat-value"></p>
+            </article>
+          </div>
+        </section>
+
+        <section class="toolbar panel reveal-block">
+          <div class="filter-group" id="media-filter" aria-label="Media filters">
+            <button type="button" data-filter="all" aria-pressed="true">All Media</button>
+            <button type="button" data-filter="video" aria-pressed="false">Video</button>
+            <button type="button" data-filter="podcast" aria-pressed="false">Podcast</button>
+            <button type="button" data-filter="meme" aria-pressed="false">Meme</button>
+            <button type="button" data-filter="brief" aria-pressed="false">Brief</button>
+          </div>
+
+          <label class="sort-shell" for="sort-select">
+            Sort by
+            <select id="sort-select">
+              <option value="hot">Hottest</option>
+              <option value="new">Newest</option>
+              <option value="clues">Most Clues</option>
+            </select>
+          </label>
+        </section>
+
+        <section id="composer" class="composer panel reveal-block">
+          <div class="section-head">
+            <p class="kicker">Contribution Console</p>
+            <h2>Drop A Lead</h2>
+          </div>
+
+          <form id="post-form" class="post-form" novalidate>
+            <label>
+              Media Type
+              <select name="type" required>
+                <option value="video">Video</option>
+                <option value="podcast">Podcast</option>
+                <option value="meme">Meme</option>
+                <option value="brief">Brief</option>
               </select>
             </label>
-            <label class="full">
-              Message
-              <textarea name="message" rows="5" placeholder="Tell us your goal and timeline" required></textarea>
+
+            <label>
+              Source URL
+              <input type="url" name="url" placeholder="https://example.com/source" required />
             </label>
-            <button type="submit" class="btn btn-solid">Send Inquiry</button>
-            <p id="form-note" class="form-note" role="status" aria-live="polite"></p>
+
+            <label class="full">
+              Lead Title
+              <input type="text" name="title" placeholder="What are we investigating?" required />
+            </label>
+
+            <label class="full">
+              Notes / Theory
+              <textarea
+                name="summary"
+                rows="4"
+                placeholder="Share your hypothesis, timeline, and open questions."
+                required
+              ></textarea>
+            </label>
+
+            <label class="full">
+              Tags (comma separated)
+              <input type="text" name="tags" placeholder="timeline, metadata, voiceprint" />
+            </label>
+
+            <div class="form-actions full">
+              <button type="submit" class="btn btn-primary">Publish Lead</button>
+              <p id="form-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+            </div>
           </form>
-        </div>
+        </section>
+
+        <section id="case-feed" class="feed reveal-block">
+          <div class="feed-head">
+            <div>
+              <p class="kicker">Open Threads</p>
+              <h2>Case Feed</h2>
+            </div>
+            <p id="feed-count" class="feed-count"></p>
+          </div>
+          <div id="feed-list" class="feed-list"></div>
+        </section>
       </section>
+
+      <aside class="rail right-rail reveal-block">
+        <section id="caseboard" class="panel">
+          <p class="kicker">Shared Intel</p>
+          <h2>Caseboard</h2>
+
+          <form id="case-form" class="stack-form compact" novalidate>
+            <label>
+              New Case Title
+              <input type="text" name="title" placeholder="Name the active investigation" required />
+            </label>
+            <label>
+              First Task
+              <input type="text" name="initialTask" placeholder="First actionable step" />
+            </label>
+            <button type="submit" class="btn btn-outline">Open Case</button>
+          </form>
+          <p id="case-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+
+          <div id="case-list" class="case-list"></div>
+        </section>
+
+        <section id="rooms" class="panel">
+          <p class="kicker">Live Collaboration</p>
+          <h2>War Rooms</h2>
+          <div id="rooms-list" class="rooms-list"></div>
+        </section>
+
+        <section class="panel">
+          <p class="kicker">Top Contributors</p>
+          <h2>Investigators</h2>
+          <ol id="investigator-list" class="investigator-list"></ol>
+        </section>
+
+        <section class="panel tags-panel">
+          <p class="kicker">Trending in Tenant</p>
+          <div id="hot-tags" class="hot-tags"></div>
+        </section>
+      </aside>
     </main>
 
     <footer class="site-footer">
-      <div class="container">
-        <p>
-          <span id="year"></span> 3 Dads After Dark.
-          <a href="https://www.youtube.com/@3dadsafterdark" target="_blank" rel="noreferrer">YouTube Channel</a>
-        </p>
-      </div>
+      <p>
+        <span id="current-year"></span> SignalScope platform. Multi-tenant collaboration engine for
+        internet investigations.
+      </p>
     </footer>
 
     <script src="/main.js"></script>
