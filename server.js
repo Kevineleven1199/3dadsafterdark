@@ -11,7 +11,15 @@ const DATA_DIR = path.isAbsolute(process.env.DATA_DIR || '')
   ? String(process.env.DATA_DIR)
   : path.join(__dirname, process.env.DATA_DIR || 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
+const REMOTE_VIEWING_IMAGE_DIR = path.join(DATA_DIR, 'remote-viewing-images');
+
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini';
+const OPENAI_JUDGE_MODEL = process.env.OPENAI_JUDGE_MODEL || 'gpt-4o-mini';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -27,8 +35,36 @@ const MIME_TYPES = {
   '.txt': 'text/plain; charset=utf-8'
 };
 
+const LEGACY_TEMPLATE_TENANT_SLUGS = new Set([
+  'cold-case-streamers',
+  'podcast-receipts-guild',
+  'meme-intel-exchange'
+]);
+
 function nowIso() {
   return new Date().toISOString();
+}
+
+function dateKeyUtc(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function parseRoundDate(roundDate) {
+  const parsed = new Date(`${roundDate}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error('Invalid round date');
+  }
+  return parsed;
+}
+
+function nextDateKey(roundDate) {
+  const parsed = parseRoundDate(roundDate);
+  parsed.setUTCDate(parsed.getUTCDate() + 1);
+  return dateKeyUtc(parsed);
+}
+
+function revealAtForRoundDate(roundDate) {
+  return `${nextDateKey(roundDate)}T00:00:00.000Z`;
 }
 
 function createPasswordHash(password) {
@@ -84,399 +120,225 @@ function hostnameFromUrl(url) {
   }
 }
 
-function createSeedData() {
-  const createdAt = nowIso();
-  const users = [
-    {
-      id: 1,
-      name: 'Signal Bot',
-      email: 'bot@signalscope.local',
-      passwordHash: createPasswordHash(crypto.randomBytes(16).toString('hex')),
-      role: 'system',
-      createdAt
-    },
-    {
-      id: 2,
-      name: 'Demo Investigator',
-      email: 'demo@signalscope.local',
-      passwordHash: createPasswordHash('demo1234'),
-      role: 'admin',
-      createdAt
-    }
-  ];
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
 
-  const tenants = [
+function isRemoteViewingReady() {
+  return Boolean(OPENAI_API_KEY);
+}
+
+function createEmptySeedData() {
+  const createdAt = nowIso();
+
+  return {
+    meta: {
+      schemaVersion: 2,
+      templateDataPurged: true,
+      initializedAt: createdAt
+    },
+    nextIds: {
+      user: 1,
+      tenant: 2,
+      channel: 3,
+      post: 1,
+      comment: 1,
+      case: 1,
+      task: 1,
+      room: 1,
+      remoteRound: 1,
+      remotePrediction: 1
+    },
+    users: [],
+    sessions: [],
+    tenants: [
+      {
+        id: 1,
+        slug: 'signalscope-global',
+        name: 'SignalScope Global',
+        tagline: 'Create investigations and build your own intel network.',
+        description:
+          'Core shared tenant for live investigations, remote-viewing rounds, and collaborative evidence tracking.',
+        theme: {
+          brand: '#0b3a53',
+          accent: '#d07a2f',
+          glow: 'rgba(11, 58, 83, 0.16)'
+        },
+        createdBy: null,
+        createdAt
+      }
+    ],
+    memberships: [],
+    channels: [
+      { id: 1, tenantId: 1, name: '#general' },
+      { id: 2, tenantId: 1, name: '#remote-viewing' }
+    ],
+    posts: [],
+    comments: [],
+    cases: [],
+    tasks: [],
+    rooms: [],
+    remoteViewingRounds: [],
+    remoteViewingPredictions: []
+  };
+}
+
+function maxId(items) {
+  return items.reduce((max, item) => {
+    const id = Number(item && item.id);
+    if (!Number.isFinite(id)) {
+      return max;
+    }
+    return Math.max(max, id);
+  }, 0);
+}
+
+function ensureDefaultTenant(data) {
+  if (Array.isArray(data.tenants) && data.tenants.length > 0) {
+    return;
+  }
+
+  const createdAt = nowIso();
+  const tenantId = 1;
+  data.tenants = [
     {
-      id: 1,
-      slug: 'cold-case-streamers',
-      name: 'Cold Case Streamers',
-      tagline: 'Decode strange footage, timeline breaks, and suspicious edits.',
+      id: tenantId,
+      slug: 'signalscope-global',
+      name: 'SignalScope Global',
+      tagline: 'Create investigations and build your own intel network.',
       description:
-        'A rapid-response community focused on video anomalies, clip provenance, and collaborative timeline reconstruction.',
+        'Core shared tenant for live investigations, remote-viewing rounds, and collaborative evidence tracking.',
       theme: {
         brand: '#0b3a53',
         accent: '#d07a2f',
         glow: 'rgba(11, 58, 83, 0.16)'
       },
-      createdBy: 2,
-      createdAt
-    },
-    {
-      id: 2,
-      slug: 'podcast-receipts-guild',
-      name: 'Podcast Receipts Guild',
-      tagline: 'Track claims, references, and hidden context in longform audio.',
-      description:
-        'Members investigate interview claims and source chains, then publish compact receipts so discussions stay grounded.',
-      theme: {
-        brand: '#1f4d2d',
-        accent: '#9f6d2f',
-        glow: 'rgba(31, 77, 45, 0.16)'
-      },
-      createdBy: 2,
-      createdAt
-    },
-    {
-      id: 3,
-      slug: 'meme-intel-exchange',
-      name: 'Meme Intel Exchange',
-      tagline: 'Investigate meme campaigns, narrative shifts, and remix origins.',
-      description:
-        'A collaborative board for tracking how memes move, mutate, and influence broader online discourse.',
-      theme: {
-        brand: '#5a2f4f',
-        accent: '#cc8f3b',
-        glow: 'rgba(90, 47, 79, 0.16)'
-      },
-      createdBy: 2,
+      createdBy: null,
       createdAt
     }
   ];
 
-  const memberships = [
-    { userId: 2, tenantId: 1, role: 'owner', joinedAt: createdAt },
-    { userId: 2, tenantId: 2, role: 'owner', joinedAt: createdAt },
-    { userId: 2, tenantId: 3, role: 'owner', joinedAt: createdAt }
-  ];
+  if (!Array.isArray(data.channels)) {
+    data.channels = [];
+  }
 
-  const channels = [
-    { id: 1, tenantId: 1, name: '#frame-by-frame' },
-    { id: 2, tenantId: 1, name: '#metadata-lab' },
-    { id: 3, tenantId: 1, name: '#live-watch' },
-    { id: 4, tenantId: 1, name: '#open-theories' },
-    { id: 5, tenantId: 2, name: '#episode-claims' },
-    { id: 6, tenantId: 2, name: '#fact-packets' },
-    { id: 7, tenantId: 2, name: '#clip-debates' },
-    { id: 8, tenantId: 2, name: '#source-vault' },
-    { id: 9, tenantId: 3, name: '#origin-hunt' },
-    { id: 10, tenantId: 3, name: '#template-lineage' },
-    { id: 11, tenantId: 3, name: '#campaign-watch' },
-    { id: 12, tenantId: 3, name: '#meme-court' }
-  ];
+  data.channels.push(
+    { id: 1, tenantId, name: '#general' },
+    { id: 2, tenantId, name: '#remote-viewing' }
+  );
+}
 
-  const posts = [
-    {
-      id: 1,
-      tenantId: 1,
-      authorId: 2,
-      type: 'video',
-      title: 'Station tunnel clip: shadow drift or composited fake?',
-      summary:
-        'Three angles disagree by 0.6 seconds. Looking for clean extraction and lighting analysis before we tag this as fabricated.',
-      url: 'https://www.youtube.com/watch?v=3CgdIcNsDQw',
-      source: 'YouTube • Nightshift Archive',
-      tags: ['timeline', 'light-source', 'cctv'],
-      clues: 41,
-      upvotes: 214,
-      status: 'investigating',
-      createdAt
-    },
-    {
-      id: 2,
-      tenantId: 1,
-      authorId: 1,
-      type: 'podcast',
-      title: 'Audio dropout at 18:03: accidental mute or intentional censor?',
-      summary:
-        'Waveform shows clean cuts around a named entity mention. Need transcript diffs between platform mirrors.',
-      url: 'https://www.youtube.com/watch?v=Tk6dJStYung',
-      source: 'Podcast mirror • Late Tape Files',
-      tags: ['transcript', 'audio-gap', 'entity-redaction'],
-      clues: 27,
-      upvotes: 141,
-      status: 'open',
-      createdAt
-    },
-    {
-      id: 3,
-      tenantId: 1,
-      authorId: 1,
-      type: 'meme',
-      title: 'Meme set with matching QR corners across five accounts',
-      summary:
-        'Possible coordinated drop. Seeking timestamp order and creator overlap before flagging as campaign behavior.',
-      url: 'https://knowyourmeme.com',
-      source: 'Cross-platform meme scrape',
-      tags: ['meme-trace', 'bot-cluster', 'qr'],
-      clues: 19,
-      upvotes: 122,
-      status: 'collecting',
-      createdAt
-    },
-    {
-      id: 4,
-      tenantId: 2,
-      authorId: 2,
-      type: 'podcast',
-      title: 'Host cites a leaked memo: can we locate the original?',
-      summary:
-        'Current source chain loops between blogs. Need first publication, timestamp, and any archive snapshots.',
-      url: 'https://www.youtube.com/watch?v=iD-_XfpV3ik',
-      source: 'Podcast network upload',
-      tags: ['memo', 'archive', 'source-chain'],
-      clues: 33,
-      upvotes: 189,
-      status: 'active',
-      createdAt
-    },
-    {
-      id: 5,
-      tenantId: 2,
-      authorId: 1,
-      type: 'video',
-      title: 'Interview clip edited mid-answer before viral repost',
-      summary:
-        'Comparing platform versions to reconstruct the uncut answer and determine who uploaded first.',
-      url: 'https://www.youtube.com/watch?v=ubSA-xJfNUI',
-      source: 'Video repost network',
-      tags: ['edit-map', 'versioning', 'upload-order'],
-      clues: 25,
-      upvotes: 137,
-      status: 'open',
-      createdAt
-    },
-    {
-      id: 6,
-      tenantId: 2,
-      authorId: 1,
-      type: 'brief',
-      title: 'Receipt pack draft: energy market claim from episode 72',
-      summary:
-        'Need one volunteer to verify two government datasets before publishing the final packet.',
-      url: 'https://archive.org',
-      source: 'Guild internal brief',
-      tags: ['dataset', 'receipt-pack', 'review'],
-      clues: 16,
-      upvotes: 88,
-      status: 'review',
-      createdAt
-    },
-    {
-      id: 7,
-      tenantId: 3,
-      authorId: 2,
-      type: 'meme',
-      title: 'Template mutation map suggests coordinated release window',
-      summary:
-        'Fifteen variants in 90 minutes from unrelated pages. Looking for shared scheduling tools or source packs.',
-      url: 'https://www.reddit.com',
-      source: 'Meme tracker ingest',
-      tags: ['release-window', 'template', 'cluster'],
-      clues: 58,
-      upvotes: 311,
-      status: 'active',
-      createdAt
-    },
-    {
-      id: 8,
-      tenantId: 3,
-      authorId: 1,
-      type: 'video',
-      title: 'Short-form meme explainer clipped to remove context',
-      summary:
-        'Need the full stream source and first clipping account to determine whether framing was intentional.',
-      url: 'https://www.youtube.com/watch?v=9SEulgwQPZM',
-      source: 'Short video mirror',
-      tags: ['context', 'clipper', 'stream-archive'],
-      clues: 22,
-      upvotes: 149,
-      status: 'watch',
-      createdAt
-    },
-    {
-      id: 9,
-      tenantId: 3,
-      authorId: 1,
-      type: 'brief',
-      title: 'Narrative shift index for week 7 posted to board',
-      summary:
-        'Draft chart links meme spikes to podcast segments. Requesting peer review before publishing externally.',
-      url: 'https://www.kaggle.com',
-      source: 'Intel board weekly brief',
-      tags: ['index', 'narrative', 'review-needed'],
-      clues: 11,
-      upvotes: 79,
-      status: 'review',
-      createdAt
-    }
-  ];
+function removeLegacyTemplateData(data) {
+  if (!data.meta) {
+    data.meta = {};
+  }
 
-  const comments = [
-    {
-      id: 1,
-      postId: 1,
-      authorId: 1,
-      body: 'Camera 2 exposure shifts exactly when the shadow appears. Could be sensor auto-leveling.',
-      createdAt
-    },
-    {
-      id: 2,
-      postId: 1,
-      authorId: 2,
-      body: 'Agreed. I can run a frame histogram pass tonight and post diff artifacts.',
-      createdAt
-    },
-    {
-      id: 3,
-      postId: 4,
-      authorId: 2,
-      body: 'Archive.org has a prior version from 2024-11-08. Pulling citation chain now.',
-      createdAt
-    },
-    {
-      id: 4,
-      postId: 7,
-      authorId: 1,
-      body: 'Variant cluster shares identical compression profile. Might indicate single export pipeline.',
-      createdAt
-    }
-  ];
+  if (data.meta.templateDataPurged) {
+    return;
+  }
 
-  const cases = [
-    {
-      id: 1,
-      tenantId: 1,
-      title: 'Southside Station Timeline',
-      ownerLabel: 'Ops Lead • Mira',
-      state: 'active',
-      createdAt
-    },
-    {
-      id: 2,
-      tenantId: 1,
-      title: 'Audio Redaction Sequence',
-      ownerLabel: 'Audio Cell • Omar',
-      state: 'watch',
-      createdAt
-    },
-    {
-      id: 3,
-      tenantId: 2,
-      title: 'Episode 72 Citation Audit',
-      ownerLabel: 'Receipts Desk • Tala',
-      state: 'review',
-      createdAt
-    },
-    {
-      id: 4,
-      tenantId: 3,
-      title: 'Template Cluster 02-20',
-      ownerLabel: 'Pattern Cell • Jo',
-      state: 'active',
-      createdAt
-    }
-  ];
+  const templateTenantIds = new Set(
+    (data.tenants || [])
+      .filter((tenant) => LEGACY_TEMPLATE_TENANT_SLUGS.has(String(tenant.slug || '').trim()))
+      .map((tenant) => tenant.id)
+  );
 
-  const tasks = [
-    { id: 1, caseId: 1, label: 'Sync all timestamps to UTC', done: true, updatedBy: 2, createdAt },
-    { id: 2, caseId: 1, label: 'Run frame diff on camera 3', done: false, updatedBy: 2, createdAt },
-    { id: 3, caseId: 1, label: 'Capture witness comments archive', done: false, updatedBy: 1, createdAt },
-    { id: 4, caseId: 2, label: 'Import mirror transcripts', done: true, updatedBy: 2, createdAt },
-    { id: 5, caseId: 2, label: 'Map silent region lengths', done: false, updatedBy: 1, createdAt },
-    { id: 6, caseId: 3, label: 'Locate original policy PDF', done: true, updatedBy: 2, createdAt },
-    { id: 7, caseId: 3, label: 'Extract quoted passage context', done: false, updatedBy: 1, createdAt },
-    { id: 8, caseId: 4, label: 'Tag unique variant signatures', done: true, updatedBy: 2, createdAt },
-    { id: 9, caseId: 4, label: 'Map distribution hubs', done: false, updatedBy: 1, createdAt }
-  ];
+  const removedPostIds = new Set(
+    (data.posts || []).filter((post) => templateTenantIds.has(post.tenantId)).map((post) => post.id)
+  );
+  const removedCaseIds = new Set(
+    (data.cases || []).filter((caseItem) => templateTenantIds.has(caseItem.tenantId)).map((caseItem) => caseItem.id)
+  );
 
-  const rooms = [
-    {
-      id: 1,
-      tenantId: 1,
-      name: 'Evidence Assembly',
-      topic: 'Synchronizing station footage clips',
-      schedule: 'Starts in 18m',
-      attendees: '32 watchers',
-      createdAt
-    },
-    {
-      id: 2,
-      tenantId: 1,
-      name: 'Night Briefing',
-      topic: 'Vote on hoax probability threshold',
-      schedule: 'Tonight 10:30 PM',
-      attendees: '78 interested',
-      createdAt
-    },
-    {
-      id: 3,
-      tenantId: 2,
-      name: 'Receipts Sprint',
-      topic: 'Publishing a one-page claim report',
-      schedule: 'Today 3:00 PM',
-      attendees: '24 editors',
-      createdAt
-    },
-    {
-      id: 4,
-      tenantId: 3,
-      name: 'Template Court',
-      topic: 'Vote on original template author',
-      schedule: 'Tonight 8:45 PM',
-      attendees: '91 jurors',
-      createdAt
-    }
-  ];
+  data.tenants = (data.tenants || []).filter((tenant) => !templateTenantIds.has(tenant.id));
+  data.memberships = (data.memberships || []).filter(
+    (membership) => !templateTenantIds.has(membership.tenantId)
+  );
+  data.channels = (data.channels || []).filter((channel) => !templateTenantIds.has(channel.tenantId));
+  data.posts = (data.posts || []).filter((post) => !templateTenantIds.has(post.tenantId));
+  data.comments = (data.comments || []).filter((comment) => !removedPostIds.has(comment.postId));
+  data.cases = (data.cases || []).filter((caseItem) => !templateTenantIds.has(caseItem.tenantId));
+  data.tasks = (data.tasks || []).filter((task) => !removedCaseIds.has(task.caseId));
+  data.rooms = (data.rooms || []).filter((room) => !templateTenantIds.has(room.tenantId));
 
-  return {
-    nextIds: {
-      user: 3,
-      tenant: 4,
-      channel: 13,
-      post: 10,
-      comment: 5,
-      case: 5,
-      task: 10,
-      room: 5
-    },
-    users,
-    sessions: [],
-    tenants,
-    memberships,
-    channels,
-    posts,
-    comments,
-    cases,
-    tasks,
-    rooms
+  const removedLocalUserIds = new Set(
+    (data.users || [])
+      .filter((user) => String(user.email || '').toLowerCase().endsWith('@signalscope.local'))
+      .map((user) => user.id)
+  );
+
+  data.users = (data.users || []).filter((user) => !removedLocalUserIds.has(user.id));
+  data.sessions = (data.sessions || []).filter((session) => !removedLocalUserIds.has(session.userId));
+  data.memberships = (data.memberships || []).filter((membership) => !removedLocalUserIds.has(membership.userId));
+
+  ensureDefaultTenant(data);
+  data.meta.templateDataPurged = true;
+}
+
+function normalizeStore(raw) {
+  const data = raw && typeof raw === 'object' ? raw : {};
+
+  data.meta = data.meta && typeof data.meta === 'object' ? data.meta : {};
+  data.nextIds = data.nextIds && typeof data.nextIds === 'object' ? data.nextIds : {};
+
+  data.users = Array.isArray(data.users) ? data.users : [];
+  data.sessions = Array.isArray(data.sessions) ? data.sessions : [];
+  data.tenants = Array.isArray(data.tenants) ? data.tenants : [];
+  data.memberships = Array.isArray(data.memberships) ? data.memberships : [];
+  data.channels = Array.isArray(data.channels) ? data.channels : [];
+  data.posts = Array.isArray(data.posts) ? data.posts : [];
+  data.comments = Array.isArray(data.comments) ? data.comments : [];
+  data.cases = Array.isArray(data.cases) ? data.cases : [];
+  data.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  data.rooms = Array.isArray(data.rooms) ? data.rooms : [];
+  data.remoteViewingRounds = Array.isArray(data.remoteViewingRounds) ? data.remoteViewingRounds : [];
+  data.remoteViewingPredictions = Array.isArray(data.remoteViewingPredictions)
+    ? data.remoteViewingPredictions
+    : [];
+
+  removeLegacyTemplateData(data);
+  ensureDefaultTenant(data);
+
+  const nextIds = {
+    user: maxId(data.users) + 1,
+    tenant: maxId(data.tenants) + 1,
+    channel: maxId(data.channels) + 1,
+    post: maxId(data.posts) + 1,
+    comment: maxId(data.comments) + 1,
+    case: maxId(data.cases) + 1,
+    task: maxId(data.tasks) + 1,
+    room: maxId(data.rooms) + 1,
+    remoteRound: maxId(data.remoteViewingRounds) + 1,
+    remotePrediction: maxId(data.remoteViewingPredictions) + 1
   };
+
+  Object.keys(nextIds).forEach((key) => {
+    data.nextIds[key] = Math.max(Number(data.nextIds[key] || 1), nextIds[key]);
+  });
+
+  data.meta.schemaVersion = 2;
+  return data;
 }
 
 function ensureDataStore() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(REMOTE_VIEWING_IMAGE_DIR, { recursive: true });
 
   if (!fs.existsSync(DATA_FILE)) {
-    const seed = createSeedData();
+    const seed = createEmptySeedData();
     fs.writeFileSync(DATA_FILE, JSON.stringify(seed, null, 2), 'utf8');
     return seed;
   }
 
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    const normalized = normalizeStore(parsed);
+    fs.writeFileSync(DATA_FILE, JSON.stringify(normalized, null, 2), 'utf8');
+    return normalized;
   } catch (error) {
-    console.error('Failed to load datastore. Recreating from seed.', error);
-    const seed = createSeedData();
+    console.error('Failed to load datastore. Recreating from empty seed.', error);
+    const seed = createEmptySeedData();
     fs.writeFileSync(DATA_FILE, JSON.stringify(seed, null, 2), 'utf8');
     return seed;
   }
@@ -639,7 +501,7 @@ function serializeStats(tenantId) {
     }
   });
 
-  const activeWatchers = Math.max(7, recentUserIds.size * 5 + Math.ceil(members * 0.6));
+  const activeWatchers = Math.max(3, recentUserIds.size * 5 + Math.ceil(members * 0.6));
 
   return {
     members: `${members.toLocaleString()} members`,
@@ -681,7 +543,7 @@ function deriveHotTags(tenantId) {
     return ranked;
   }
 
-  return ['#new-room', '#open-investigation'];
+  return ['#first-investigation', '#remote-viewing'];
 }
 
 function serializeComment(comment) {
@@ -860,15 +722,470 @@ function resolvePath(urlPath) {
   const sanitizedPath = decodeURIComponent(urlPath.split('?')[0]);
   const target = sanitizedPath === '/' ? '/index.html' : sanitizedPath;
   const absolutePath = path.normalize(path.join(PUBLIC_DIR, target));
+
   if (!absolutePath.startsWith(PUBLIC_DIR)) {
     return null;
   }
+
   return absolutePath;
+}
+
+async function callOpenAi(endpoint, payload) {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required for remote viewing engines');
+  }
+
+  const response = await fetch(`${OPENAI_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await response.text();
+  let parsed = {};
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      parsed = {};
+    }
+  }
+
+  if (!response.ok) {
+    const message = parsed?.error?.message || raw || `OpenAI request failed with status ${response.status}`;
+    throw new Error(`OpenAI API error: ${message}`);
+  }
+
+  return parsed;
+}
+
+function extractJsonObject(content) {
+  const trimmed = String(content || '').trim();
+  if (!trimmed) {
+    throw new Error('Model returned empty content');
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch (_error) {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) {
+      throw new Error('Model output was not valid JSON');
+    }
+
+    return JSON.parse(match[0]);
+  }
+}
+
+async function generateRemoteViewingTarget(roundDate) {
+  const entropy = crypto.randomBytes(8).toString('hex');
+  const payload = await callOpenAi('/chat/completions', {
+    model: OPENAI_TEXT_MODEL,
+    temperature: 1,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You design remote-viewing targets. Return JSON only with keys: title, prompt. Title should be short. Prompt should describe a vivid, specific scene with clear objects, location, action, and atmosphere.'
+      },
+      {
+        role: 'user',
+        content: `Create a unique remote-viewing target for UTC day ${roundDate}. Use entropy token ${entropy}. Keep prompt under 360 characters.`
+      }
+    ]
+  });
+
+  const content = payload?.choices?.[0]?.message?.content;
+  const parsed = extractJsonObject(content);
+
+  const title = safeTrim(parsed.title, 120);
+  const prompt = safeTrim(parsed.prompt, 500);
+
+  if (!title || !prompt) {
+    throw new Error('Prompt generator did not return valid title/prompt');
+  }
+
+  return { title, prompt };
+}
+
+async function downloadImageBuffer(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download generated image (${response.status})`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+async function generateRemoteViewingImageFile(roundDate, roundId, prompt) {
+  const payload = await callOpenAi('/images/generations', {
+    model: OPENAI_IMAGE_MODEL,
+    prompt,
+    size: '1024x1024'
+  });
+
+  const item = payload?.data?.[0];
+  if (!item) {
+    throw new Error('Image generator returned no image data');
+  }
+
+  let buffer = null;
+  if (item.b64_json) {
+    buffer = Buffer.from(item.b64_json, 'base64');
+  } else if (item.url) {
+    buffer = await downloadImageBuffer(item.url);
+  }
+
+  if (!buffer || buffer.length === 0) {
+    throw new Error('Generated image buffer was empty');
+  }
+
+  fs.mkdirSync(REMOTE_VIEWING_IMAGE_DIR, { recursive: true });
+  const filename = `${roundDate}-${roundId}.png`;
+  const absolutePath = path.join(REMOTE_VIEWING_IMAGE_DIR, filename);
+  fs.writeFileSync(absolutePath, buffer);
+
+  return {
+    filename,
+    revisedPrompt: safeTrim(item.revised_prompt || '', 500)
+  };
+}
+
+async function judgePredictionWithAi(predictionText, round) {
+  const payload = await callOpenAi('/chat/completions', {
+    model: OPENAI_JUDGE_MODEL,
+    temperature: 0,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You score remote-viewing guesses. Return JSON only with keys: outcome, score, rationale. outcome must be win or loss. score must be integer 0-100. A win means meaningful overlap with target scene objects/location/action.'
+      },
+      {
+        role: 'user',
+        content:
+          `Target title: ${round.targetTitle}\nTarget prompt: ${round.targetPrompt}\nUser prediction: ${predictionText}\nReturn strict JSON.`
+      }
+    ]
+  });
+
+  const content = payload?.choices?.[0]?.message?.content;
+  const parsed = extractJsonObject(content);
+
+  const outcome = String(parsed.outcome || '').toLowerCase() === 'win' ? 'win' : 'loss';
+  const score = clampNumber(Number(parsed.score) || (outcome === 'win' ? 72 : 28), 0, 100);
+  const rationale = safeTrim(parsed.rationale || 'No rationale provided.', 300);
+
+  return { outcome, score, rationale };
+}
+
+function isRoundRevealed(round, atMs = Date.now()) {
+  return new Date(round.revealAt).getTime() <= atMs;
+}
+
+function getRoundByDate(roundDate) {
+  return store.remoteViewingRounds.find((round) => round.roundDate === roundDate) || null;
+}
+
+const generationLocks = new Map();
+let scoringLock = null;
+
+async function ensureRemoteViewingRound(roundDate) {
+  const existing = getRoundByDate(roundDate);
+  if (existing && existing.imageFilename && existing.targetPrompt) {
+    return existing;
+  }
+
+  if (generationLocks.has(roundDate)) {
+    return generationLocks.get(roundDate);
+  }
+
+  const lockPromise = (async () => {
+    if (!isRemoteViewingReady()) {
+      throw new Error('OPENAI_API_KEY is not configured. Remote viewing generation is unavailable.');
+    }
+
+    let round = getRoundByDate(roundDate);
+    if (!round) {
+      round = {
+        id: nextId('remoteRound'),
+        roundDate,
+        targetTitle: '',
+        targetPrompt: '',
+        revisedPrompt: '',
+        imageFilename: '',
+        generatedAt: '',
+        revealAt: revealAtForRoundDate(roundDate),
+        imageModel: OPENAI_IMAGE_MODEL,
+        promptModel: OPENAI_TEXT_MODEL,
+        judgeModel: OPENAI_JUDGE_MODEL,
+        status: 'generating',
+        createdAt: nowIso()
+      };
+      store.remoteViewingRounds.push(round);
+      persistStore();
+    }
+
+    try {
+      const target = await generateRemoteViewingTarget(roundDate);
+      const image = await generateRemoteViewingImageFile(roundDate, round.id, target.prompt);
+
+      round.targetTitle = target.title;
+      round.targetPrompt = target.prompt;
+      round.revisedPrompt = image.revisedPrompt;
+      round.imageFilename = image.filename;
+      round.generatedAt = nowIso();
+      round.revealAt = revealAtForRoundDate(roundDate);
+      round.imageModel = OPENAI_IMAGE_MODEL;
+      round.promptModel = OPENAI_TEXT_MODEL;
+      round.judgeModel = OPENAI_JUDGE_MODEL;
+      round.status = 'hidden';
+
+      persistStore();
+      return round;
+    } catch (error) {
+      store.remoteViewingRounds = store.remoteViewingRounds.filter((item) => item.id !== round.id);
+      persistStore();
+      throw error;
+    }
+  })();
+
+  generationLocks.set(roundDate, lockPromise);
+
+  try {
+    return await lockPromise;
+  } finally {
+    generationLocks.delete(roundDate);
+  }
+}
+
+function serializePrediction(prediction) {
+  return {
+    id: prediction.id,
+    prediction: prediction.prediction,
+    createdAt: prediction.createdAt,
+    outcome: prediction.outcome || 'pending',
+    score: Number.isFinite(Number(prediction.score)) ? Number(prediction.score) : null,
+    rationale: prediction.rationale || ''
+  };
+}
+
+function remoteRecordForUser(userId) {
+  const resolved = store.remoteViewingPredictions.filter(
+    (prediction) => prediction.userId === userId && (prediction.outcome === 'win' || prediction.outcome === 'loss')
+  );
+
+  const wins = resolved.filter((prediction) => prediction.outcome === 'win').length;
+  const losses = resolved.filter((prediction) => prediction.outcome === 'loss').length;
+  const total = wins + losses;
+
+  return {
+    wins,
+    losses,
+    total,
+    winRate: total > 0 ? `${Math.round((wins / total) * 100)}%` : '0%'
+  };
+}
+
+function remoteLeaderboard(limit = 10) {
+  const scoreboard = new Map();
+
+  const increment = (userId, field) => {
+    if (!scoreboard.has(userId)) {
+      scoreboard.set(userId, { wins: 0, losses: 0 });
+    }
+    scoreboard.get(userId)[field] += 1;
+  };
+
+  store.remoteViewingPredictions.forEach((prediction) => {
+    if (prediction.outcome === 'win') {
+      increment(prediction.userId, 'wins');
+    } else if (prediction.outcome === 'loss') {
+      increment(prediction.userId, 'losses');
+    }
+  });
+
+  return [...scoreboard.entries()]
+    .map(([userId, tally]) => {
+      const user = store.users.find((entry) => entry.id === userId);
+      const total = tally.wins + tally.losses;
+      return {
+        userId,
+        userName: user ? user.name : `User ${userId}`,
+        wins: tally.wins,
+        losses: tally.losses,
+        total,
+        winRate: total > 0 ? `${Math.round((tally.wins / total) * 100)}%` : '0%'
+      };
+    })
+    .sort((a, b) => {
+      if (b.wins !== a.wins) {
+        return b.wins - a.wins;
+      }
+      if (a.losses !== b.losses) {
+        return a.losses - b.losses;
+      }
+      return a.userName.localeCompare(b.userName);
+    })
+    .slice(0, limit);
+}
+
+async function scorePendingRemotePredictions() {
+  if (!isRemoteViewingReady()) {
+    return;
+  }
+
+  if (scoringLock) {
+    await scoringLock;
+    return;
+  }
+
+  scoringLock = (async () => {
+    const nowMs = Date.now();
+    let changed = false;
+
+    const revealedRounds = store.remoteViewingRounds.filter(
+      (round) => round.imageFilename && round.targetPrompt && isRoundRevealed(round, nowMs)
+    );
+
+    for (const round of revealedRounds) {
+      round.status = 'revealed';
+
+      const pendingPredictions = store.remoteViewingPredictions.filter(
+        (prediction) => prediction.roundId === round.id && !prediction.outcome
+      );
+
+      for (const prediction of pendingPredictions) {
+        try {
+          const judged = await judgePredictionWithAi(prediction.prediction, round);
+          prediction.outcome = judged.outcome;
+          prediction.score = judged.score;
+          prediction.rationale = judged.rationale;
+          prediction.scoredAt = nowIso();
+          delete prediction.judgeError;
+          changed = true;
+        } catch (error) {
+          prediction.judgeError = safeTrim(error.message, 300);
+          prediction.scoreAttempts = Number(prediction.scoreAttempts || 0) + 1;
+          prediction.lastScoreAttemptAt = nowIso();
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      persistStore();
+    }
+  })();
+
+  try {
+    await scoringLock;
+  } finally {
+    scoringLock = null;
+  }
+}
+
+function getLatestRevealedRound() {
+  const nowMs = Date.now();
+
+  return store.remoteViewingRounds
+    .filter((round) => round.imageFilename && round.targetPrompt && isRoundRevealed(round, nowMs))
+    .sort((a, b) => new Date(b.roundDate).getTime() - new Date(a.roundDate).getTime())[0] || null;
+}
+
+function serializeRoundForDaily(round, userId = null, includeTarget = false) {
+  if (!round) {
+    return null;
+  }
+
+  const nowMs = Date.now();
+  const revealed = isRoundRevealed(round, nowMs);
+  const myPrediction =
+    userId === null
+      ? null
+      : store.remoteViewingPredictions.find(
+          (prediction) => prediction.roundId === round.id && prediction.userId === userId
+        ) || null;
+
+  return {
+    id: round.id,
+    roundDate: round.roundDate,
+    revealAt: round.revealAt,
+    status: revealed ? 'revealed' : 'hidden',
+    submissionOpen: !revealed,
+    generatedAt: round.generatedAt || null,
+    imageModel: round.imageModel || OPENAI_IMAGE_MODEL,
+    myPrediction: myPrediction ? serializePrediction(myPrediction) : null,
+    imageUrl: includeTarget && revealed ? `/api/remote-viewing/rounds/${round.id}/image` : null,
+    targetTitle: includeTarget && revealed ? round.targetTitle : null,
+    targetPrompt: includeTarget && revealed ? round.targetPrompt : null
+  };
+}
+
+async function buildRemoteViewingDailyPayload(userId = null) {
+  let todayRound = getRoundByDate(dateKeyUtc());
+
+  if (!todayRound && isRemoteViewingReady()) {
+    todayRound = await ensureRemoteViewingRound(dateKeyUtc());
+  }
+
+  await scorePendingRemotePredictions();
+
+  const revealedRound = getLatestRevealedRound();
+
+  return {
+    engine: {
+      provider: 'openai',
+      ready: isRemoteViewingReady(),
+      imageModel: OPENAI_IMAGE_MODEL,
+      promptModel: OPENAI_TEXT_MODEL,
+      judgeModel: OPENAI_JUDGE_MODEL,
+      message: isRemoteViewingReady()
+        ? 'Remote viewing engines online.'
+        : 'OPENAI_API_KEY is missing. Daily target generation is unavailable.'
+    },
+    today: serializeRoundForDaily(todayRound, userId, false),
+    revealed: serializeRoundForDaily(revealedRound, userId, true),
+    record: userId === null ? { wins: 0, losses: 0, total: 0, winRate: '0%' } : remoteRecordForUser(userId),
+    leaderboard: remoteLeaderboard(12)
+  };
+}
+
+function getRoundImageFile(round) {
+  if (!round || !round.imageFilename) {
+    return null;
+  }
+
+  const filename = path.basename(round.imageFilename);
+  const absolutePath = path.join(REMOTE_VIEWING_IMAGE_DIR, filename);
+  if (!absolutePath.startsWith(REMOTE_VIEWING_IMAGE_DIR)) {
+    return null;
+  }
+
+  if (!fs.existsSync(absolutePath)) {
+    return null;
+  }
+
+  return absolutePath;
+}
+
+function ensureRoundForPredictionSubmission() {
+  const today = dateKeyUtc();
+  return ensureRemoteViewingRound(today);
 }
 
 async function handleApi(req, res, pathname, searchParams) {
   if (req.method === 'GET' && pathname === '/api/health') {
-    sendJson(res, 200, { ok: true, timestamp: nowIso() });
+    sendJson(res, 200, {
+      ok: true,
+      timestamp: nowIso(),
+      remoteViewingEngineReady: isRemoteViewingReady()
+    });
     return;
   }
 
@@ -961,6 +1278,116 @@ async function handleApi(req, res, pathname, searchParams) {
     }
 
     sendJson(res, 200, { user: userResponse(auth.user) });
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/api/remote-viewing/daily') {
+    const auth = getAuthContext(req);
+    const payload = await buildRemoteViewingDailyPayload(auth.user?.id || null);
+    sendJson(res, 200, payload);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/remote-viewing/predictions') {
+    const auth = requireAuth(req, res);
+    if (!auth) {
+      return;
+    }
+
+    if (!isRemoteViewingReady()) {
+      sendError(res, 503, 'OPENAI_API_KEY is not configured. Remote viewing is unavailable.');
+      return;
+    }
+
+    const body = await parseJsonBody(req);
+    const predictionText = safeTrim(body.prediction, 1200);
+    if (predictionText.length < 8) {
+      sendError(res, 400, 'Prediction must be at least 8 characters long');
+      return;
+    }
+
+    const todayRound = await ensureRoundForPredictionSubmission();
+    if (!todayRound) {
+      sendError(res, 500, 'Unable to initialize today\'s remote viewing round');
+      return;
+    }
+
+    if (isRoundRevealed(todayRound)) {
+      sendError(res, 400, 'Predictions are closed for today. Wait for the next round.');
+      return;
+    }
+
+    const existing = store.remoteViewingPredictions.find(
+      (prediction) => prediction.roundId === todayRound.id && prediction.userId === auth.user.id
+    );
+
+    if (existing) {
+      existing.prediction = predictionText;
+      existing.updatedAt = nowIso();
+      existing.outcome = '';
+      existing.score = null;
+      existing.rationale = '';
+      existing.scoredAt = null;
+      delete existing.judgeError;
+      delete existing.scoreAttempts;
+      delete existing.lastScoreAttemptAt;
+
+      persistStore();
+      sendJson(res, 200, { prediction: serializePrediction(existing) });
+      return;
+    }
+
+    const prediction = {
+      id: nextId('remotePrediction'),
+      roundId: todayRound.id,
+      userId: auth.user.id,
+      prediction: predictionText,
+      createdAt: nowIso(),
+      outcome: '',
+      score: null,
+      rationale: '',
+      scoredAt: null
+    };
+
+    store.remoteViewingPredictions.push(prediction);
+    persistStore();
+
+    sendJson(res, 201, { prediction: serializePrediction(prediction) });
+    return;
+  }
+
+  const roundImageMatch = pathname.match(/^\/api\/remote-viewing\/rounds\/(\d+)\/image$/);
+  if (req.method === 'GET' && roundImageMatch) {
+    const roundId = Number(roundImageMatch[1]);
+    const round = store.remoteViewingRounds.find((item) => item.id === roundId);
+    if (!round) {
+      sendError(res, 404, 'Remote viewing round not found');
+      return;
+    }
+
+    if (!isRoundRevealed(round)) {
+      sendError(res, 403, 'Image is locked until reveal time');
+      return;
+    }
+
+    const imagePath = getRoundImageFile(round);
+    if (!imagePath) {
+      sendError(res, 404, 'Image file not found');
+      return;
+    }
+
+    fs.readFile(imagePath, (error, data) => {
+      if (error) {
+        sendError(res, 500, 'Unable to read image file');
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Cache-Control': 'no-store'
+      });
+      res.end(data);
+    });
     return;
   }
 
@@ -1338,5 +1765,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`SignalScope platform running on ${HOST}:${PORT}`);
-  console.log('Demo login: demo@signalscope.local / demo1234');
+  console.log(`Remote viewing engine: ${isRemoteViewingReady() ? 'OPENAI READY' : 'OPENAI_API_KEY missing'}`);
 });

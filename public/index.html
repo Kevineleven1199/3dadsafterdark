@@ -28,6 +28,7 @@
         </a>
 
         <nav class="primary-nav" aria-label="Primary">
+          <a href="#remote-viewing">Remote Viewing</a>
           <a href="#case-feed">Case Feed</a>
           <a href="#composer">Drop A Lead</a>
           <a href="#caseboard">Caseboard</a>
@@ -79,7 +80,7 @@
             <button type="submit" class="btn btn-outline">Create Account</button>
           </form>
 
-          <p class="tiny-note">Demo login: <code>demo@signalscope.local</code> / <code>demo1234</code></p>
+          <p class="tiny-note">Create an account to submit predictions and track your win/loss record.</p>
           <p id="auth-feedback" class="form-feedback" role="status" aria-live="polite"></p>
         </section>
 
@@ -149,6 +150,61 @@
             <article>
               <p class="stat-label">Open Cases</p>
               <p id="stat-cases" class="stat-value"></p>
+            </article>
+          </div>
+        </section>
+
+        <section id="remote-viewing" class="remote-viewing panel reveal-block">
+          <div class="section-head">
+            <p class="kicker">Daily Remote Viewing</p>
+            <h2>Predict Today. Reveal Tomorrow.</h2>
+          </div>
+
+          <p id="rv-engine-note" class="rv-engine-note">
+            The target image is AI-generated on the day, then locked until the next day.
+          </p>
+
+          <div class="rv-grid">
+            <article class="rv-card">
+              <h3>Today&apos;s Locked Target</h3>
+              <p id="rv-today-meta" class="rv-meta"></p>
+
+              <form id="rv-form" class="stack-form compact" novalidate>
+                <label>
+                  Your Prediction
+                  <textarea
+                    id="rv-prediction"
+                    name="prediction"
+                    rows="4"
+                    placeholder="Describe what you sense: objects, place, colors, motion, or mood."
+                    required
+                  ></textarea>
+                </label>
+                <button type="submit" class="btn btn-primary">Submit Prediction</button>
+              </form>
+              <p id="rv-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+            </article>
+
+            <article class="rv-card">
+              <h3>Latest Revealed Target</h3>
+              <p id="rv-revealed-meta" class="rv-meta"></p>
+              <figure id="rv-image-shell" class="rv-image-shell" hidden>
+                <img id="rv-image" alt="Revealed remote viewing target" />
+              </figure>
+              <p id="rv-prompt" class="rv-prompt"></p>
+              <p id="rv-outcome" class="form-feedback"></p>
+            </article>
+          </div>
+
+          <div class="rv-bottom">
+            <article class="rv-record">
+              <h3>Your Record</h3>
+              <p id="rv-record"></p>
+            </article>
+
+            <article class="rv-record">
+              <h3>Leaderboard</h3>
+              <ol id="rv-leaderboard" class="rv-leaderboard"></ol>
             </article>
           </div>
         </section>

@@ -15,7 +15,8 @@ const state = {
   tenantDetail: null,
   posts: [],
   filter: 'all',
-  sort: 'hot'
+  sort: 'hot',
+  remoteViewing: null
 };
 
 const nodes = {
@@ -46,6 +47,18 @@ const nodes = {
   tenantFeedback: document.getElementById('tenant-feedback'),
   caseForm: document.getElementById('case-form'),
   caseFeedback: document.getElementById('case-feedback'),
+  rvForm: document.getElementById('rv-form'),
+  rvPrediction: document.getElementById('rv-prediction'),
+  rvFeedback: document.getElementById('rv-feedback'),
+  rvEngineNote: document.getElementById('rv-engine-note'),
+  rvTodayMeta: document.getElementById('rv-today-meta'),
+  rvRevealedMeta: document.getElementById('rv-revealed-meta'),
+  rvImageShell: document.getElementById('rv-image-shell'),
+  rvImage: document.getElementById('rv-image'),
+  rvPrompt: document.getElementById('rv-prompt'),
+  rvOutcome: document.getElementById('rv-outcome'),
+  rvRecord: document.getElementById('rv-record'),
+  rvLeaderboard: document.getElementById('rv-leaderboard'),
   year: document.getElementById('current-year')
 };
 
@@ -171,6 +184,11 @@ function renderTenantSelector() {
     return;
   }
 
+  if (state.tenants.length === 0) {
+    nodes.tenantSelect.innerHTML = '<option value="">No tenants</option>';
+    return;
+  }
+
   nodes.tenantSelect.innerHTML = state.tenants
     .map((tenant) => {
       const selected = Number(tenant.id) === Number(state.tenantId) ? ' selected' : '';
@@ -181,6 +199,11 @@ function renderTenantSelector() {
 
 function renderTenantList() {
   if (!nodes.tenantList) {
+    return;
+  }
+
+  if (state.tenants.length === 0) {
+    nodes.tenantList.innerHTML = '<p class="rv-meta">No tenants yet. Create one to begin.</p>';
     return;
   }
 
@@ -198,6 +221,13 @@ function renderTenantList() {
 
 function renderHero() {
   if (!state.tenantDetail) {
+    if (nodes.heroTitle) {
+      nodes.heroTitle.textContent = 'SignalScope';
+    }
+    if (nodes.heroDescription) {
+      nodes.heroDescription.textContent =
+        'Create a tenant to start publishing investigations, evidence threads, and remote-viewing predictions.';
+    }
     return;
   }
 
@@ -265,9 +295,10 @@ function commentMarkup(comment) {
 function postCardMarkup(post) {
   const type = TYPE_LABELS[post.type] || 'Post';
   const safeUrl = escapeHtml(post.url);
-  const commentsMarkup = post.latestComments && post.latestComments.length > 0
-    ? post.latestComments.map((comment) => commentMarkup(comment)).join('')
-    : '<p class="post-author">No comments yet. Start the thread.</p>';
+  const commentsMarkup =
+    post.latestComments && post.latestComments.length > 0
+      ? post.latestComments.map((comment) => commentMarkup(comment)).join('')
+      : '<p class="post-author">No comments yet. Start the thread.</p>';
 
   const tagsMarkup = (post.tags || [])
     .slice(0, 6)
@@ -275,9 +306,7 @@ function postCardMarkup(post) {
     .join('');
 
   const disabled = state.user ? '' : ' disabled';
-  const commentPlaceholder = state.user
-    ? 'Add a finding or source update'
-    : 'Log in to join this thread';
+  const commentPlaceholder = state.user ? 'Add a finding or source update' : 'Log in to join this thread';
 
   return `<article class="feed-card">
     <div class="feed-card-head">
@@ -392,6 +421,114 @@ function renderInvestigators() {
     .join('');
 }
 
+function renderRemoteViewing() {
+  if (!nodes.rvEngineNote || !nodes.rvTodayMeta || !nodes.rvRevealedMeta || !nodes.rvRecord || !nodes.rvLeaderboard) {
+    return;
+  }
+
+  const payload = state.remoteViewing;
+  if (!payload) {
+    nodes.rvEngineNote.textContent = 'Loading daily remote viewing data...';
+    return;
+  }
+
+  const engine = payload.engine || { ready: false, message: 'Remote viewing engine unavailable.' };
+  const today = payload.today;
+  const revealed = payload.revealed;
+
+  nodes.rvEngineNote.textContent = engine.message || '';
+
+  if (today) {
+    nodes.rvTodayMeta.textContent = `Round ${today.roundDate}. Locked until ${formatTimestamp(today.revealAt)}.`;
+  } else if (engine.ready) {
+    nodes.rvTodayMeta.textContent = 'Today\'s round is initializing.';
+  } else {
+    nodes.rvTodayMeta.textContent = 'Today\'s round unavailable until OpenAI key is configured.';
+  }
+
+  const canSubmit = Boolean(state.user && engine.ready && today && today.submissionOpen);
+  if (nodes.rvForm) {
+    const controls = Array.from(nodes.rvForm.querySelectorAll('textarea, button'));
+    controls.forEach((element) => {
+      element.disabled = !canSubmit;
+    });
+  }
+
+  if (today?.myPrediction && nodes.rvPrediction) {
+    nodes.rvPrediction.value = today.myPrediction.prediction || '';
+  }
+
+  if (!state.user && nodes.rvFeedback && !nodes.rvFeedback.textContent) {
+    setFeedback(nodes.rvFeedback, 'Log in to submit a daily prediction.', 'error');
+  }
+
+  if (revealed) {
+    nodes.rvRevealedMeta.textContent = `Round ${revealed.roundDate} revealed on ${formatTimestamp(revealed.revealAt)}.`;
+
+    if (nodes.rvImageShell && nodes.rvImage) {
+      if (revealed.imageUrl) {
+        nodes.rvImage.src = revealed.imageUrl;
+        nodes.rvImageShell.hidden = false;
+      } else {
+        nodes.rvImageShell.hidden = true;
+      }
+    }
+
+    if (nodes.rvPrompt) {
+      nodes.rvPrompt.textContent = revealed.targetPrompt
+        ? `Target prompt: ${revealed.targetPrompt}`
+        : 'Target prompt unavailable.';
+    }
+
+    const myPrediction = revealed.myPrediction;
+    if (myPrediction && nodes.rvOutcome) {
+      if (myPrediction.outcome === 'win') {
+        setFeedback(
+          nodes.rvOutcome,
+          `Win (${myPrediction.score ?? 'n/a'}). ${myPrediction.rationale || ''}`,
+          'success'
+        );
+      } else if (myPrediction.outcome === 'loss') {
+        setFeedback(
+          nodes.rvOutcome,
+          `Loss (${myPrediction.score ?? 'n/a'}). ${myPrediction.rationale || ''}`,
+          'error'
+        );
+      } else {
+        setFeedback(nodes.rvOutcome, 'Prediction submitted. AI scoring is pending.', 'neutral');
+      }
+    } else if (nodes.rvOutcome) {
+      setFeedback(nodes.rvOutcome, 'No prediction submitted for the latest revealed round.', 'neutral');
+    }
+  } else {
+    nodes.rvRevealedMeta.textContent = 'No revealed round yet. Check back after the next reveal window.';
+    if (nodes.rvImageShell) {
+      nodes.rvImageShell.hidden = true;
+    }
+    if (nodes.rvPrompt) {
+      nodes.rvPrompt.textContent = '';
+    }
+    if (nodes.rvOutcome) {
+      setFeedback(nodes.rvOutcome, '', 'neutral');
+    }
+  }
+
+  const record = payload.record || { wins: 0, losses: 0, total: 0, winRate: '0%' };
+  nodes.rvRecord.textContent = `${record.wins}W ${record.losses}L (${record.winRate}) across ${record.total} scored rounds.`;
+
+  const leaderboard = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
+  if (leaderboard.length === 0) {
+    nodes.rvLeaderboard.innerHTML = '<li>No scored rounds yet.</li>';
+  } else {
+    nodes.rvLeaderboard.innerHTML = leaderboard
+      .map(
+        (entry) =>
+          `<li>${escapeHtml(entry.userName)} • ${entry.wins}W-${entry.losses}L (${escapeHtml(entry.winRate)})</li>`
+      )
+      .join('');
+  }
+}
+
 function renderAll() {
   renderAuth();
   renderTenantSelector();
@@ -399,6 +536,7 @@ function renderAll() {
   renderHero();
   renderChannels();
   renderHotTags();
+  renderRemoteViewing();
   renderFilterButtons();
   renderFeed();
   renderCases();
@@ -472,11 +610,33 @@ async function loadTenantData() {
   await Promise.all([loadTenantDetail(), loadPosts()]);
 }
 
+async function loadRemoteViewing() {
+  try {
+    const payload = await apiRequest('/api/remote-viewing/daily');
+    state.remoteViewing = payload;
+  } catch (error) {
+    state.remoteViewing = {
+      engine: {
+        ready: false,
+        message: error.message || 'Remote viewing endpoint unavailable.'
+      },
+      today: null,
+      revealed: null,
+      record: { wins: 0, losses: 0, total: 0, winRate: '0%' },
+      leaderboard: []
+    };
+  }
+}
+
+async function refreshAllData() {
+  await loadTenants();
+  await Promise.all([loadTenantData(), loadRemoteViewing()]);
+}
+
 async function withRefresh(task, feedbackNode) {
   try {
     await task();
-    await loadTenantData();
-    await loadTenants();
+    await refreshAllData();
     renderAll();
   } catch (error) {
     const isAuthError = error.status === 401;
@@ -572,7 +732,7 @@ async function handleLogout() {
   state.user = null;
   localStorage.removeItem(STORAGE_TOKEN_KEY);
   setFeedback(nodes.authFeedback, 'You are now logged out.', 'success');
-  renderAuth();
+  await withRefresh(async () => {}, null);
 }
 
 async function handlePostSubmit(event) {
@@ -633,7 +793,7 @@ async function handleCreateTenant(event) {
     state.tenantId = Number(payload.tenant.id);
     state.filter = 'all';
     state.sort = 'new';
-    await loadTenantData();
+    await Promise.all([loadTenantData(), loadRemoteViewing()]);
     renderAll();
   } catch (error) {
     setFeedback(nodes.tenantFeedback, error.message, 'error');
@@ -664,6 +824,28 @@ async function handleCreateCase(event) {
     nodes.caseForm.reset();
     setFeedback(nodes.caseFeedback, 'New case opened.', 'success');
   }, nodes.caseFeedback);
+}
+
+async function handleRemotePredictionSubmit(event) {
+  event.preventDefault();
+  if (!nodes.rvForm || !nodes.rvPrediction || !requireSession(nodes.rvFeedback)) {
+    return;
+  }
+
+  const prediction = String(nodes.rvPrediction.value || '').trim();
+  if (prediction.length < 8) {
+    setFeedback(nodes.rvFeedback, 'Prediction must be at least 8 characters.', 'error');
+    return;
+  }
+
+  await withRefresh(async () => {
+    await apiRequest('/api/remote-viewing/predictions', {
+      method: 'POST',
+      body: { prediction }
+    });
+
+    setFeedback(nodes.rvFeedback, 'Prediction submitted for today\'s locked target.', 'success');
+  }, nodes.rvFeedback);
 }
 
 async function handleFeedClick(event) {
@@ -753,59 +935,81 @@ function setupEvents() {
   }
 
   if (nodes.logoutBtn) {
-    nodes.logoutBtn.addEventListener('click', handleLogout);
+    nodes.logoutBtn.addEventListener('click', () => {
+      void handleLogout();
+    });
   }
 
   if (nodes.tenantSelect) {
-    nodes.tenantSelect.addEventListener('change', async (event) => {
-      state.tenantId = Number(event.target.value || 0);
-      state.filter = 'all';
-      await withRefresh(async () => {}, nodes.authFeedback);
+    nodes.tenantSelect.addEventListener('change', (event) => {
+      void (async () => {
+        state.tenantId = Number(event.target.value || 0);
+        state.filter = 'all';
+        await withRefresh(async () => {}, nodes.authFeedback);
+      })();
     });
   }
 
   if (nodes.tenantList) {
-    nodes.tenantList.addEventListener('click', async (event) => {
-      const trigger = event.target.closest('[data-community]');
-      if (!trigger) {
-        return;
-      }
+    nodes.tenantList.addEventListener('click', (event) => {
+      void (async () => {
+        const trigger = event.target.closest('[data-community]');
+        if (!trigger) {
+          return;
+        }
 
-      state.tenantId = Number(trigger.dataset.community || 0);
-      state.filter = 'all';
-      await withRefresh(async () => {}, nodes.authFeedback);
+        state.tenantId = Number(trigger.dataset.community || 0);
+        state.filter = 'all';
+        await withRefresh(async () => {}, nodes.authFeedback);
+      })();
     });
   }
 
   if (nodes.mediaFilter) {
-    nodes.mediaFilter.addEventListener('click', async (event) => {
-      const trigger = event.target.closest('button[data-filter]');
-      if (!trigger) {
-        return;
-      }
+    nodes.mediaFilter.addEventListener('click', (event) => {
+      void (async () => {
+        const trigger = event.target.closest('button[data-filter]');
+        if (!trigger) {
+          return;
+        }
 
-      state.filter = String(trigger.dataset.filter || 'all');
-      await withRefresh(async () => {}, nodes.authFeedback);
+        state.filter = String(trigger.dataset.filter || 'all');
+        await withRefresh(async () => {}, nodes.authFeedback);
+      })();
     });
   }
 
   if (nodes.sortSelect) {
-    nodes.sortSelect.addEventListener('change', async (event) => {
-      state.sort = String(event.target.value || 'hot');
-      await withRefresh(async () => {}, nodes.authFeedback);
+    nodes.sortSelect.addEventListener('change', (event) => {
+      void (async () => {
+        state.sort = String(event.target.value || 'hot');
+        await withRefresh(async () => {}, nodes.authFeedback);
+      })();
     });
   }
 
   if (nodes.postForm) {
-    nodes.postForm.addEventListener('submit', handlePostSubmit);
+    nodes.postForm.addEventListener('submit', (event) => {
+      void handlePostSubmit(event);
+    });
   }
 
   if (nodes.tenantForm) {
-    nodes.tenantForm.addEventListener('submit', handleCreateTenant);
+    nodes.tenantForm.addEventListener('submit', (event) => {
+      void handleCreateTenant(event);
+    });
   }
 
   if (nodes.caseForm) {
-    nodes.caseForm.addEventListener('submit', handleCreateCase);
+    nodes.caseForm.addEventListener('submit', (event) => {
+      void handleCreateCase(event);
+    });
+  }
+
+  if (nodes.rvForm) {
+    nodes.rvForm.addEventListener('submit', (event) => {
+      void handleRemotePredictionSubmit(event);
+    });
   }
 
   if (nodes.feedList) {
@@ -857,8 +1061,7 @@ async function init() {
 
   try {
     await loadCurrentUser();
-    await loadTenants();
-    await loadTenantData();
+    await refreshAllData();
     renderAll();
   } catch (error) {
     console.error(error);
