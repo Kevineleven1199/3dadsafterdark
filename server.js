@@ -128,6 +128,11 @@ function isRemoteViewingReady() {
   return Boolean(OPENAI_API_KEY);
 }
 
+function normalizeErrorMessage(error, fallback) {
+  const message = safeTrim(error && error.message ? error.message : '', 420);
+  return message || fallback;
+}
+
 function createEmptySeedData() {
   const createdAt = nowIso();
 
@@ -1128,26 +1133,47 @@ function serializeRoundForDaily(round, userId = null, includeTarget = false) {
 }
 
 async function buildRemoteViewingDailyPayload(userId = null) {
+  let engineReady = isRemoteViewingReady();
+  let engineMessage = engineReady
+    ? 'Remote viewing engines online.'
+    : 'OPENAI_API_KEY is missing. Daily target generation is unavailable.';
+
   let todayRound = getRoundByDate(dateKeyUtc());
 
-  if (!todayRound && isRemoteViewingReady()) {
-    todayRound = await ensureRemoteViewingRound(dateKeyUtc());
+  if (!todayRound && engineReady) {
+    try {
+      todayRound = await ensureRemoteViewingRound(dateKeyUtc());
+    } catch (error) {
+      engineReady = false;
+      engineMessage = normalizeErrorMessage(
+        error,
+        'OpenAI generation failed. Check quota, billing, and model access.'
+      );
+    }
   }
 
-  await scorePendingRemotePredictions();
+  if (engineReady) {
+    try {
+      await scorePendingRemotePredictions();
+    } catch (error) {
+      engineReady = false;
+      engineMessage = normalizeErrorMessage(
+        error,
+        'OpenAI scoring failed. Check quota, billing, and model access.'
+      );
+    }
+  }
 
   const revealedRound = getLatestRevealedRound();
 
   return {
     engine: {
       provider: 'openai',
-      ready: isRemoteViewingReady(),
+      ready: engineReady,
       imageModel: OPENAI_IMAGE_MODEL,
       promptModel: OPENAI_TEXT_MODEL,
       judgeModel: OPENAI_JUDGE_MODEL,
-      message: isRemoteViewingReady()
-        ? 'Remote viewing engines online.'
-        : 'OPENAI_API_KEY is missing. Daily target generation is unavailable.'
+      message: engineMessage
     },
     today: serializeRoundForDaily(todayRound, userId, false),
     revealed: serializeRoundForDaily(revealedRound, userId, true),
@@ -1306,7 +1332,21 @@ async function handleApi(req, res, pathname, searchParams) {
       return;
     }
 
-    const todayRound = await ensureRoundForPredictionSubmission();
+    let todayRound;
+    try {
+      todayRound = await ensureRoundForPredictionSubmission();
+    } catch (error) {
+      sendError(
+        res,
+        503,
+        normalizeErrorMessage(
+          error,
+          'Remote viewing generation is currently unavailable. Check OpenAI quota/billing.'
+        )
+      );
+      return;
+    }
+
     if (!todayRound) {
       sendError(res, 500, 'Unable to initialize today\'s remote viewing round');
       return;
