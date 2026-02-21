@@ -27,6 +27,7 @@ const nodes = {
   hotTags: document.getElementById('hot-tags'),
   heroTitle: document.getElementById('hero-title'),
   heroDescription: document.getElementById('hero-description'),
+  onboardingStatus: document.getElementById('onboarding-status'),
   membersStat: document.getElementById('stat-members'),
   activeStat: document.getElementById('stat-active'),
   casesStat: document.getElementById('stat-cases'),
@@ -245,7 +246,7 @@ function renderHero() {
     }
     if (nodes.heroDescription) {
       nodes.heroDescription.textContent =
-        'Create a tenant to start publishing investigations, evidence threads, and remote-viewing predictions.';
+        'Use the quick-start steps below to sign in, choose a community, and start contributing clear, source-backed findings.';
     }
     return;
   }
@@ -271,6 +272,49 @@ function renderHero() {
   if (nodes.casesStat) {
     nodes.casesStat.textContent = tenant.stats?.cases || '0 open';
   }
+}
+
+function renderOnboarding() {
+  const statusNode = nodes.onboardingStatus;
+  const stepNodes = Array.from(document.querySelectorAll('#onboarding-steps li[data-step]'));
+  if (!statusNode || stepNodes.length === 0) {
+    return;
+  }
+
+  const hasAccount = Boolean(state.user);
+  const hasCommunity = Boolean(state.tenantId);
+  const hasContribution =
+    Boolean(state.remoteViewing?.today?.myPrediction) || (Array.isArray(state.posts) && state.posts.length > 0);
+
+  const stepState = {
+    account: hasAccount,
+    community: hasCommunity,
+    contribute: hasContribution
+  };
+
+  stepNodes.forEach((stepNode) => {
+    const key = String(stepNode.dataset.step || '');
+    const done = Boolean(stepState[key]);
+    stepNode.classList.toggle('done', done);
+    stepNode.classList.toggle('active', !done);
+  });
+
+  if (!hasAccount) {
+    statusNode.textContent = 'Start with Step 1: create an account to unlock posting and predictions.';
+    return;
+  }
+
+  if (!hasCommunity) {
+    statusNode.textContent = 'Step 2: pick or create a community so your updates land in the right place.';
+    return;
+  }
+
+  if (!hasContribution) {
+    statusNode.textContent = 'Step 3: submit your first prediction or publish your first lead.';
+    return;
+  }
+
+  statusNode.textContent = 'You are set up. Keep the streak going with one prediction and one lead daily.';
 }
 
 function renderChannels() {
@@ -671,6 +715,7 @@ function renderAll() {
   renderTenantSelector();
   renderTenantList();
   renderHero();
+  renderOnboarding();
   renderChannels();
   renderHotTags();
   renderRemoteViewing();
@@ -1198,6 +1243,21 @@ async function handleCaseClick(event) {
   }, nodes.caseFeedback);
 }
 
+function jumpToSection(sectionId) {
+  const section = document.getElementById(sectionId);
+  if (!section) {
+    return;
+  }
+
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const focusTarget = section.querySelector('input, textarea, select, button');
+  if (focusTarget) {
+    setTimeout(() => {
+      focusTarget.focus({ preventScroll: true });
+    }, 280);
+  }
+}
+
 function setupEvents() {
   if (nodes.loginForm) {
     nodes.loginForm.addEventListener('submit', handleLoginSubmit);
@@ -1345,6 +1405,12 @@ function setupEvents() {
       void handleCaseClick(event);
     });
   }
+
+  Array.from(document.querySelectorAll('[data-jump]')).forEach((button) => {
+    button.addEventListener('click', () => {
+      jumpToSection(String(button.getAttribute('data-jump') || ''));
+    });
+  });
 }
 
 function setupRevealAnimation() {

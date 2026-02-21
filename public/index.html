@@ -17,22 +17,23 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#top">Skip to main content</a>
     <header class="top-bar">
       <div class="top-shell">
         <a class="brand" href="#top" aria-label="SignalScope home">
           <span class="brand-token">SS</span>
           <span class="brand-copy">
             <strong>SignalScope</strong>
-            <small>Community intelligence network</small>
+            <small>Clear, collaborative internet investigations</small>
           </span>
         </a>
 
         <nav class="primary-nav" aria-label="Primary">
-          <a href="#remote-viewing">Remote Viewing</a>
-          <a href="#case-feed">Case Feed</a>
-          <a href="#composer">Drop A Lead</a>
+          <a href="#remote-viewing">Daily Predictions</a>
+          <a href="#case-feed">Community Feed</a>
+          <a href="#composer">Share A Link</a>
           <a href="#caseboard">Caseboard</a>
-          <a href="#rooms">War Rooms</a>
+          <a href="#rooms">Live Rooms</a>
         </nav>
 
         <div class="header-controls">
@@ -50,7 +51,7 @@
       <aside class="rail left-rail reveal-block">
         <section class="panel" id="auth-panel">
           <p class="kicker">Identity</p>
-          <h2>Access Node</h2>
+          <h2>Sign In</h2>
 
           <form id="login-form" class="stack-form" novalidate>
             <label>
@@ -80,18 +81,18 @@
             <button type="submit" class="btn btn-outline">Create Account</button>
           </form>
 
-          <p class="tiny-note">Create an account to submit predictions and track your win/loss record.</p>
+          <p class="tiny-note">Create an account to post, comment, and track your prediction accuracy.</p>
           <p id="auth-feedback" class="form-feedback" role="status" aria-live="polite"></p>
         </section>
 
         <section class="panel">
           <p class="kicker">Tenant Directory</p>
-          <h2>Community Hubs</h2>
+          <h2>Communities</h2>
           <div id="tenant-list" class="tenant-list" role="list"></div>
         </section>
 
         <section class="panel" id="tenant-panel">
-          <p class="kicker">Launch Tenant</p>
+          <p class="kicker">Start A Space</p>
           <h2>Create Community</h2>
           <form id="tenant-form" class="stack-form compact" novalidate>
             <label>
@@ -118,12 +119,12 @@
 
         <section class="panel">
           <p class="kicker">Current Channels</p>
-          <h2>Investigation Lanes</h2>
+          <h2>Channels</h2>
           <ul id="channel-list" class="channel-list"></ul>
         </section>
 
         <section class="panel">
-          <p class="kicker">Signal Protocol</p>
+          <p class="kicker">Ground Rules</p>
           <ul class="rules-list">
             <li>Always link source material.</li>
             <li>Separate facts from speculation.</li>
@@ -137,6 +138,23 @@
           <p class="kicker">Multi-tenant internet investigation platform</p>
           <h1 id="hero-title"></h1>
           <p id="hero-description" class="hero-description"></p>
+
+          <div class="hero-actions">
+            <button type="button" class="btn btn-primary" data-jump="auth-panel">Step 1: Create Account</button>
+            <button type="button" class="btn btn-outline" data-jump="remote-viewing">Step 2: Submit Prediction</button>
+            <button type="button" class="btn btn-outline" data-jump="composer">Step 3: Share A Link</button>
+            <button type="button" class="btn btn-quiet" data-jump="caseboard">Open Caseboard</button>
+          </div>
+
+          <div class="onboarding-card">
+            <p class="kicker">Quick Start</p>
+            <ol id="onboarding-steps" class="onboarding-steps">
+              <li data-step="account"><strong>Create an account</strong><span>Unlock posting and prediction tracking.</span></li>
+              <li data-step="community"><strong>Pick a community</strong><span>Choose where your findings should land.</span></li>
+              <li data-step="contribute"><strong>Contribute daily</strong><span>Submit a prediction or publish a lead.</span></li>
+            </ol>
+            <p id="onboarding-status" class="onboarding-status" role="status" aria-live="polite"></p>
+          </div>
 
           <div class="hero-stats">
             <article>
@@ -302,7 +320,7 @@
         <section id="composer" class="composer panel reveal-block">
           <div class="section-head">
             <p class="kicker">Contribution Console</p>
-            <h2>Drop A Lead</h2>
+            <h2>Share A Lead</h2>
           </div>
 
           <form id="post-form" class="post-form" novalidate>
@@ -383,7 +401,7 @@
 
         <section id="rooms" class="panel">
           <p class="kicker">Live Collaboration</p>
-          <h2>War Rooms</h2>
+          <h2>Live Rooms</h2>
           <div id="rooms-list" class="rooms-list"></div>
         </section>
 
