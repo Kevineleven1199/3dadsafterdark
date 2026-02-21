@@ -7,8 +7,10 @@ Targets are generated on the day, hidden until the next day, then scored for win
 
 - Frontend: static HTML/CSS/JS in `/public`
 - Backend: Node HTTP server in `/server.js`
-- Persistence: JSON datastore in `DATA_DIR/store.json`
-- Runtime deps: none (Node 18+)
+- Persistence:
+  - Postgres datastore via `DATABASE_URL` (recommended for Railway)
+  - File datastore fallback in `DATA_DIR/store.json` when `DATABASE_URL` is not set
+- Runtime deps: `pg` + Node 18+
 
 ## Core Features
 
@@ -51,6 +53,9 @@ At least one full provider chain is needed:
 - `HOST` (default `0.0.0.0`)
 - `PORT` (default `3000`)
 - `DATA_DIR` (default `./data`)
+- `DATABASE_URL` (Postgres connection URL; when set, app state is persisted in Postgres)
+- `DATABASE_STORE_KEY` (default `signalscope-main`)
+- `DATABASE_SSL=true|false|require` (optional override; auto-detected when URL includes `sslmode=require`)
 - `PUBLIC_BASE_URL` (used for links in X posts)
 - `ANTHROPIC_API_KEY`
 - `ANTHROPIC_BASE_URL` (default `https://api.anthropic.com/v1`)
@@ -91,13 +96,15 @@ ANTHROPIC_API_KEY=... OPENROUTER_API_KEY=... HOST=127.0.0.1 PORT=3001 DATA_DIR=/
 
 1. Push to GitHub.
 2. Create a Railway project from this repo.
-3. Add a Railway Volume and mount it at `/data`.
-4. Set env vars:
-   - `DATA_DIR=/data`
+3. Add a Railway Postgres service to the project.
+4. In the `web` service, set env vars:
+   - `DATABASE_URL=${{Postgres.DATABASE_URL}}`
    - `ANTHROPIC_API_KEY=...`
    - `OPENROUTER_API_KEY=...`
    - optional X integration vars if you want auto-posting
-5. Deploy.
+5. Add a Railway Volume and mount it at `/data` for image files.
+6. Set `DATA_DIR=/data`.
+7. Deploy.
 
 ## API Endpoints
 

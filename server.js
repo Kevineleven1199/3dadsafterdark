@@ -13,6 +13,9 @@ const DATA_DIR = path.isAbsolute(process.env.DATA_DIR || '')
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 const REMOTE_VIEWING_IMAGE_DIR = path.join(DATA_DIR, 'remote-viewing-images');
 const COMMUNITY_VIEWING_IMAGE_DIR = path.join(DATA_DIR, 'community-viewing-images');
+const DATABASE_URL = process.env.DATABASE_URL || '';
+const DATABASE_STORE_KEY = safeTrim(process.env.DATABASE_STORE_KEY || 'signalscope-main', 100) || 'signalscope-main';
+const DATABASE_SSL = String(process.env.DATABASE_SSL || '').toLowerCase();
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -537,9 +540,127 @@ function ensureDataStore() {
   }
 }
 
-let store = ensureDataStore();
+function maybeLoadLocalSeedForDatabase() {
+  if (!fs.existsSync(DATA_FILE)) {
+    return createEmptySeedData();
+  }
+
+  try {
+    const raw = fs.readFileSync(DATA_FILE, 'utf8');
+    return normalizeStore(JSON.parse(raw));
+  } catch (error) {
+    console.error('Failed to parse local store.json for database migration. Creating empty seed.', error);
+    return createEmptySeedData();
+  }
+}
+
+function databaseSslConfig() {
+  if (DATABASE_SSL === 'true' || DATABASE_SSL === '1' || DATABASE_SSL === 'require') {
+    return { rejectUnauthorized: false };
+  }
+  if (DATABASE_SSL === 'false' || DATABASE_SSL === '0' || DATABASE_SSL === 'disable') {
+    return false;
+  }
+  if (DATABASE_URL.includes('sslmode=require')) {
+    return { rejectUnauthorized: false };
+  }
+  return false;
+}
+
+let pgPool = null;
+let store = createEmptySeedData();
+let storageBackend = 'file';
+let persistQueue = Promise.resolve();
+
+function createPgPool() {
+  if (pgPool) {
+    return pgPool;
+  }
+
+  const { Pool } = require('pg');
+  const ssl = databaseSslConfig();
+  pgPool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: ssl || undefined
+  });
+  return pgPool;
+}
+
+async function ensureDatabaseStore() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(REMOTE_VIEWING_IMAGE_DIR, { recursive: true });
+  fs.mkdirSync(COMMUNITY_VIEWING_IMAGE_DIR, { recursive: true });
+
+  const pool = createPgPool();
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS signalscope_store (
+      id TEXT PRIMARY KEY,
+      payload JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`
+  );
+
+  const existing = await pool.query('SELECT payload FROM signalscope_store WHERE id = $1 LIMIT 1', [DATABASE_STORE_KEY]);
+  if (existing.rows[0] && existing.rows[0].payload) {
+    const normalized = normalizeStore(existing.rows[0].payload);
+    await pool.query('UPDATE signalscope_store SET payload = $2::jsonb, updated_at = NOW() WHERE id = $1', [
+      DATABASE_STORE_KEY,
+      JSON.stringify(normalized)
+    ]);
+    return normalized;
+  }
+
+  const seed = maybeLoadLocalSeedForDatabase();
+  await pool.query(
+    'INSERT INTO signalscope_store (id, payload, updated_at) VALUES ($1, $2::jsonb, NOW()) ON CONFLICT (id) DO NOTHING',
+    [DATABASE_STORE_KEY, JSON.stringify(seed)]
+  );
+  return seed;
+}
+
+async function initializeStore() {
+  if (DATABASE_URL) {
+    try {
+      store = await ensureDatabaseStore();
+      storageBackend = 'postgres';
+      return;
+    } catch (error) {
+      console.error('Database store initialization failed. Falling back to file store.', error);
+    }
+  }
+
+  store = ensureDataStore();
+  storageBackend = 'file';
+}
+
+function persistStoreToPostgres(snapshot) {
+  if (!pgPool) {
+    return;
+  }
+
+  persistQueue = persistQueue
+    .catch(() => {
+      // Keep queue alive after previous failure.
+    })
+    .then(() =>
+      pgPool.query(
+        `INSERT INTO signalscope_store (id, payload, updated_at)
+         VALUES ($1, $2::jsonb, NOW())
+         ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()`,
+        [DATABASE_STORE_KEY, snapshot]
+      )
+    )
+    .catch((error) => {
+      console.error('Failed to persist store to Postgres:', error);
+    });
+}
 
 function persistStore() {
+  if (storageBackend === 'postgres' && pgPool) {
+    persistStoreToPostgres(JSON.stringify(store));
+    return;
+  }
+
   fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8');
 }
 
@@ -2780,7 +2901,11 @@ async function handleApi(req, res, pathname, searchParams) {
     sendJson(res, 200, {
       ok: true,
       timestamp: nowIso(),
-      remoteViewingEngineReady: isRemoteViewingReady()
+      remoteViewingEngineReady: isRemoteViewingReady(),
+      persistence: {
+        backend: storageBackend,
+        databaseConfigured: Boolean(DATABASE_URL)
+      }
     });
     return;
   }
@@ -3823,30 +3948,78 @@ function startParallelDynamicLoop() {
   }, 60_000);
 }
 
-server.listen(PORT, HOST, () => {
-  console.log(`SignalScope platform running on ${HOST}:${PORT}`);
-  const order = buildFailoverOrder();
-  console.log(
-    `Remote viewing failover prompt chain: ${
-      order.prompt.length ? order.prompt.join(' -> ') : 'none configured'
-    }`
-  );
-  console.log(
-    `Remote viewing failover image chain: ${order.image.length ? order.image.join(' -> ') : 'none configured'}`
-  );
-  const reserve = reserveInventorySummary();
-  console.log(`Remote viewing reserve inventory: ${reserve.available}/${reserve.total} available`);
-  console.log(
-    `X auto-post: ${X_AUTOPOST_ENABLED ? 'enabled' : 'disabled'} | credentials: ${
-      hasXCredentials() ? 'present' : 'missing'
-    }`
-  );
-  console.log(
-    `Parallel dynamic generation schedule (UTC): ${String(PARALLEL_DYNAMIC_GENERATE_HOUR_UTC).padStart(2, '0')}:${String(
-      PARALLEL_DYNAMIC_GENERATE_MINUTE_UTC
-    ).padStart(2, '0')}`
-  );
-  console.log(`Parallel preloaded frontload default days: ${PARALLEL_PRELOAD_DEFAULT_DAYS}`);
-  startXAutoPostLoop();
-  startParallelDynamicLoop();
+async function shutdown(signal) {
+  try {
+    if (xAutoPostTimer) {
+      clearInterval(xAutoPostTimer);
+      xAutoPostTimer = null;
+    }
+    if (parallelDynamicTimer) {
+      clearInterval(parallelDynamicTimer);
+      parallelDynamicTimer = null;
+    }
+
+    await persistQueue.catch(() => {
+      // Ignore flush errors during shutdown.
+    });
+
+    if (pgPool) {
+      await pgPool.end();
+      pgPool = null;
+    }
+  } catch (error) {
+    console.error(`Shutdown error (${signal}):`, error);
+  } finally {
+    process.exit(0);
+  }
+}
+
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
 });
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+
+async function startServer() {
+  try {
+    await initializeStore();
+  } catch (error) {
+    console.error('Fatal: unable to initialize datastore.', error);
+    process.exit(1);
+  }
+
+  server.listen(PORT, HOST, () => {
+    console.log(`SignalScope platform running on ${HOST}:${PORT}`);
+    console.log(
+      `Persistence backend: ${storageBackend}${DATABASE_URL ? ` (DATABASE_URL set, key: ${DATABASE_STORE_KEY})` : ''}`
+    );
+    const order = buildFailoverOrder();
+    console.log(
+      `Remote viewing failover prompt chain: ${
+        order.prompt.length ? order.prompt.join(' -> ') : 'none configured'
+      }`
+    );
+    console.log(
+      `Remote viewing failover image chain: ${order.image.length ? order.image.join(' -> ') : 'none configured'}`
+    );
+    const reserve = reserveInventorySummary();
+    console.log(`Remote viewing reserve inventory: ${reserve.available}/${reserve.total} available`);
+    console.log(
+      `X auto-post: ${X_AUTOPOST_ENABLED ? 'enabled' : 'disabled'} | credentials: ${
+        hasXCredentials() ? 'present' : 'missing'
+      }`
+    );
+    console.log(
+      `Parallel dynamic generation schedule (UTC): ${String(PARALLEL_DYNAMIC_GENERATE_HOUR_UTC).padStart(2, '0')}:${String(
+        PARALLEL_DYNAMIC_GENERATE_MINUTE_UTC
+      ).padStart(2, '0')}`
+    );
+    console.log(`Parallel preloaded frontload default days: ${PARALLEL_PRELOAD_DEFAULT_DAYS}`);
+    startXAutoPostLoop();
+    startParallelDynamicLoop();
+  });
+}
+
+void startServer();
