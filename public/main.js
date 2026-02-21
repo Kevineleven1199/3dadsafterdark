@@ -949,6 +949,15 @@ async function handleLoginSubmit(event) {
     return;
   }
 
+  if (state.user) {
+    setFeedback(
+      nodes.authFeedback,
+      `Already logged in as ${state.user.email}. Click Log out first to switch accounts.`,
+      'error'
+    );
+    return;
+  }
+
   const formData = new FormData(nodes.loginForm);
   const email = String(formData.get('email') || '').trim();
   const password = String(formData.get('password') || '');
@@ -979,6 +988,15 @@ async function handleLoginSubmit(event) {
 async function handleRegisterSubmit(event) {
   event.preventDefault();
   if (!nodes.registerForm) {
+    return;
+  }
+
+  if (state.user) {
+    setFeedback(
+      nodes.authFeedback,
+      `Already logged in as ${state.user.email}. Click Log out first to create another account.`,
+      'error'
+    );
     return;
   }
 
