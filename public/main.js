@@ -99,7 +99,6 @@ const nodes = {
   rvCommunityPredictionsList: document.getElementById('rv-community-predictions-list'),
   year: document.getElementById('current-year'),
   abductionIntro: document.getElementById('abduction-intro'),
-  introEnterBtn: document.getElementById('intro-enter-btn'),
   introSkipBtn: document.getElementById('intro-skip-btn')
 };
 
@@ -161,6 +160,7 @@ function fileToDataUrl(file) {
 function setupAbductionIntro() {
   const intro = nodes.abductionIntro;
   if (!intro) {
+    document.body.classList.add('ship-interior');
     return;
   }
 
@@ -185,6 +185,7 @@ function setupAbductionIntro() {
     document.removeEventListener('keydown', handleKeydown);
     localStorage.setItem(INTRO_STORAGE_KEY, '1');
     document.body.classList.remove('intro-lock');
+    document.body.classList.add('ship-interior');
     intro.classList.add('closing');
     setTimeout(() => {
       intro.classList.add('hidden');
@@ -200,10 +201,6 @@ function setupAbductionIntro() {
   document.body.classList.add('intro-lock');
   document.addEventListener('keydown', handleKeydown);
 
-  if (nodes.introEnterBtn) {
-    nodes.introEnterBtn.addEventListener('click', closeIntro);
-  }
-
   if (nodes.introSkipBtn) {
     nodes.introSkipBtn.addEventListener('click', closeIntro);
   }
@@ -216,19 +213,19 @@ function setupAbductionIntro() {
   };
 
   if (quickMode) {
-    schedule(120, 'phase-beam');
-    schedule(260, 'phase-abduct');
-    schedule(420, 'phase-portal');
-    schedule(620, 'phase-ready');
-    timers.push(setTimeout(closeIntro, 2100));
+    schedule(80, 'phase-beam');
+    schedule(210, 'phase-abduct');
+    schedule(380, 'phase-jump');
+    schedule(560, 'phase-cockpit');
+    timers.push(setTimeout(closeIntro, 1450));
     return;
   }
 
-  schedule(650, 'phase-beam');
-  schedule(1700, 'phase-abduct');
-  schedule(3050, 'phase-portal');
-  schedule(4550, 'phase-ready');
-  timers.push(setTimeout(closeIntro, 7800));
+  schedule(450, 'phase-beam');
+  schedule(1300, 'phase-abduct');
+  schedule(2550, 'phase-jump');
+  schedule(3900, 'phase-cockpit');
+  timers.push(setTimeout(closeIntro, 5500));
 }
 
 async function apiRequest(endpoint, options = {}) {
@@ -274,9 +271,9 @@ function applyTenantTheme(theme) {
     return;
   }
 
-  document.documentElement.style.setProperty('--tenant-brand', theme.brand || '#0b3a53');
-  document.documentElement.style.setProperty('--tenant-accent', theme.accent || '#d07a2f');
-  document.documentElement.style.setProperty('--tenant-glow', theme.glow || 'rgba(11, 58, 83, 0.16)');
+  document.documentElement.style.setProperty('--tenant-brand', theme.brand || '#7cc4ff');
+  document.documentElement.style.setProperty('--tenant-accent', theme.accent || '#91ff6a');
+  document.documentElement.style.setProperty('--tenant-glow', theme.glow || 'rgba(145, 255, 106, 0.2)');
 }
 
 function requireSession(feedbackNode) {

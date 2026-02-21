@@ -62,6 +62,11 @@ const PARALLEL_TRACK_PRELOADED = 'preloaded';
 const MAX_COMMUNITY_UPLOAD_BYTES = 8 * 1024 * 1024;
 const DEFAULT_JSON_BODY_BYTES = 1_000_000;
 const COMMUNITY_UPLOAD_JSON_BODY_BYTES = 12 * 1024 * 1024;
+const DEFAULT_TENANT_THEME = {
+  brand: '#7cc4ff',
+  accent: '#91ff6a',
+  glow: 'rgba(145, 255, 106, 0.2)'
+};
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -275,11 +280,7 @@ function createEmptySeedData() {
         tagline: 'Create investigations and build your own intel network.',
         description:
           'Core shared tenant for live investigations, remote-viewing rounds, and collaborative evidence tracking.',
-        theme: {
-          brand: '#0b3a53',
-          accent: '#d07a2f',
-          glow: 'rgba(11, 58, 83, 0.16)'
-        },
+        theme: { ...DEFAULT_TENANT_THEME },
         createdBy: null,
         createdAt
       }
@@ -329,11 +330,7 @@ function ensureDefaultTenant(data) {
       tagline: 'Create investigations and build your own intel network.',
       description:
         'Core shared tenant for live investigations, remote-viewing rounds, and collaborative evidence tracking.',
-      theme: {
-        brand: '#0b3a53',
-        accent: '#d07a2f',
-        glow: 'rgba(11, 58, 83, 0.16)'
-      },
+      theme: { ...DEFAULT_TENANT_THEME },
       createdBy: null,
       createdAt
     }
@@ -417,6 +414,40 @@ function removeLegacyTemplateData(data) {
   data.meta.templateDataPurged = true;
 }
 
+function refreshTenantThemes(data) {
+  const tenants = Array.isArray(data.tenants) ? data.tenants : [];
+  tenants.forEach((tenant) => {
+    if (!tenant || typeof tenant !== 'object') {
+      return;
+    }
+
+    const theme = tenant.theme && typeof tenant.theme === 'object' ? tenant.theme : {};
+    const legacyDefaultTheme =
+      String(theme.brand || '').toLowerCase() === '#0b3a53' &&
+      String(theme.accent || '').toLowerCase() === '#d07a2f';
+
+    if (tenant.slug === 'signalscope-global' && (legacyDefaultTheme || !theme.brand || !theme.accent)) {
+      tenant.theme = { ...DEFAULT_TENANT_THEME };
+      return;
+    }
+
+    if (!theme.brand || !theme.accent) {
+      tenant.theme = {
+        brand: theme.brand || DEFAULT_TENANT_THEME.brand,
+        accent: theme.accent || DEFAULT_TENANT_THEME.accent,
+        glow: theme.glow || DEFAULT_TENANT_THEME.glow
+      };
+      return;
+    }
+
+    tenant.theme = {
+      brand: theme.brand,
+      accent: theme.accent,
+      glow: theme.glow || DEFAULT_TENANT_THEME.glow
+    };
+  });
+}
+
 function normalizeStore(raw) {
   const data = raw && typeof raw === 'object' ? raw : {};
 
@@ -453,6 +484,7 @@ function normalizeStore(raw) {
 
   removeLegacyTemplateData(data);
   ensureDefaultTenant(data);
+  refreshTenantThemes(data);
 
   const nextIds = {
     user: maxId(data.users) + 1,
@@ -866,11 +898,11 @@ function serializeTenantDetail(tenant, userId = null) {
 
 function randomThemeFromName(name) {
   const themes = [
-    { brand: '#0b3a53', accent: '#d07a2f', glow: 'rgba(11, 58, 83, 0.16)' },
-    { brand: '#1f4d2d', accent: '#9f6d2f', glow: 'rgba(31, 77, 45, 0.16)' },
-    { brand: '#5a2f4f', accent: '#cc8f3b', glow: 'rgba(90, 47, 79, 0.16)' },
-    { brand: '#234b71', accent: '#cb7e31', glow: 'rgba(35, 75, 113, 0.16)' },
-    { brand: '#4d3b1e', accent: '#2d6e70', glow: 'rgba(45, 110, 112, 0.16)' }
+    { brand: '#7cc4ff', accent: '#91ff6a', glow: 'rgba(145, 255, 106, 0.2)' },
+    { brand: '#78b8ff', accent: '#ffd36a', glow: 'rgba(120, 184, 255, 0.18)' },
+    { brand: '#9ab8ff', accent: '#89ffe1', glow: 'rgba(137, 255, 225, 0.18)' },
+    { brand: '#c6a8ff', accent: '#9ff67f', glow: 'rgba(159, 246, 127, 0.2)' },
+    { brand: '#78d2ff', accent: '#ffca92', glow: 'rgba(120, 210, 255, 0.18)' }
   ];
 
   const hash = String(name)
