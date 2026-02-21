@@ -214,6 +214,70 @@
             <button type="button" id="rv-x-post-btn" class="btn btn-outline">Post Latest Reveal To X</button>
             <p id="rv-admin-feedback" class="form-feedback" role="status" aria-live="polite"></p>
           </div>
+
+          <section class="rv-parallel">
+            <div class="section-head compact">
+              <p class="kicker">Parallel Accuracy Lab</p>
+              <h3>Dynamic vs Preloaded</h3>
+            </div>
+            <p id="rv-parallel-note" class="rv-engine-note">
+              Dynamic track generates at 08:55 UTC. Preloaded track is generated ahead of time.
+            </p>
+
+            <div class="rv-grid rv-parallel-grid">
+              <article class="rv-card">
+                <h3>Dynamic Daily Track</h3>
+                <p id="rv-parallel-dynamic-meta" class="rv-meta"></p>
+                <form id="rv-parallel-dynamic-form" class="stack-form compact" novalidate>
+                  <label>
+                    Dynamic Prediction
+                    <textarea
+                      id="rv-parallel-dynamic-prediction"
+                      name="prediction"
+                      rows="4"
+                      placeholder="Submit before the 08:55 UTC generation window."
+                      required
+                    ></textarea>
+                  </label>
+                  <button type="submit" class="btn btn-outline">Submit Dynamic Guess</button>
+                </form>
+                <p id="rv-parallel-dynamic-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+                <p id="rv-parallel-dynamic-record" class="rv-meta"></p>
+              </article>
+
+              <article class="rv-card">
+                <h3>Preloaded 365-Day Track</h3>
+                <p id="rv-parallel-preloaded-meta" class="rv-meta"></p>
+                <form id="rv-parallel-preloaded-form" class="stack-form compact" novalidate>
+                  <label>
+                    Preloaded Prediction
+                    <textarea
+                      id="rv-parallel-preloaded-prediction"
+                      name="prediction"
+                      rows="4"
+                      placeholder="Submit against the pre-generated control track."
+                      required
+                    ></textarea>
+                  </label>
+                  <button type="submit" class="btn btn-outline">Submit Preloaded Guess</button>
+                </form>
+                <p id="rv-parallel-preloaded-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+                <p id="rv-parallel-preloaded-record" class="rv-meta"></p>
+              </article>
+            </div>
+
+            <div class="rv-admin">
+              <button type="button" id="rv-parallel-frontload-btn" class="btn btn-outline">
+                Frontload 365 Preloaded Track
+              </button>
+              <p id="rv-parallel-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+            </div>
+
+            <article class="rv-record">
+              <h3>Track Comparison</h3>
+              <p id="rv-parallel-comparison"></p>
+            </article>
+          </section>
         </section>
 
         <section class="toolbar panel reveal-block">

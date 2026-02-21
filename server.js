@@ -44,6 +44,20 @@ const X_ACCESS_TOKEN_SECRET = process.env.X_ACCESS_TOKEN_SECRET || '';
 const X_AUTOPOST_ENABLED = String(process.env.X_AUTOPOST_ENABLED || '').toLowerCase() === 'true';
 const X_AUTOPOST_INTERVAL_MS = Math.max(60_000, Number(process.env.X_AUTOPOST_INTERVAL_MS || 15 * 60 * 1000));
 const PROVIDER_TIMEOUT_MS = Math.max(5_000, Number(process.env.PROVIDER_TIMEOUT_MS || 30_000));
+const PARALLEL_DYNAMIC_GENERATE_HOUR_UTC = clampNumber(
+  Number(process.env.PARALLEL_DYNAMIC_GENERATE_HOUR_UTC || 8),
+  0,
+  23
+);
+const PARALLEL_DYNAMIC_GENERATE_MINUTE_UTC = clampNumber(
+  Number(process.env.PARALLEL_DYNAMIC_GENERATE_MINUTE_UTC || 55),
+  0,
+  59
+);
+const PARALLEL_PRELOAD_DEFAULT_DAYS = clampNumber(Number(process.env.PARALLEL_PRELOAD_DEFAULT_DAYS || 365), 1, 730);
+
+const PARALLEL_TRACK_DYNAMIC = 'dynamic';
+const PARALLEL_TRACK_PRELOADED = 'preloaded';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -89,6 +103,12 @@ function nextDateKey(roundDate) {
 
 function revealAtForRoundDate(roundDate) {
   return `${nextDateKey(roundDate)}T00:00:00.000Z`;
+}
+
+function dynamicGenerateAtForRoundDate(roundDate) {
+  const hour = String(PARALLEL_DYNAMIC_GENERATE_HOUR_UTC).padStart(2, '0');
+  const minute = String(PARALLEL_DYNAMIC_GENERATE_MINUTE_UTC).padStart(2, '0');
+  return `${roundDate}T${hour}:${minute}:00.000Z`;
 }
 
 function createPasswordHash(password) {
@@ -235,7 +255,9 @@ function createEmptySeedData() {
       room: 1,
       remoteRound: 1,
       remotePrediction: 1,
-      remoteReserve: 1
+      remoteReserve: 1,
+      remoteParallelRound: 1,
+      remoteParallelPrediction: 1
     },
     users: [],
     sessions: [],
@@ -268,7 +290,9 @@ function createEmptySeedData() {
     rooms: [],
     remoteViewingRounds: [],
     remoteViewingPredictions: [],
-    remoteViewingReserveItems: []
+    remoteViewingReserveItems: [],
+    remoteViewingParallelRounds: [],
+    remoteViewingParallelPredictions: []
   };
 }
 
@@ -387,6 +411,12 @@ function normalizeStore(raw) {
   data.remoteViewingReserveItems = Array.isArray(data.remoteViewingReserveItems)
     ? data.remoteViewingReserveItems
     : [];
+  data.remoteViewingParallelRounds = Array.isArray(data.remoteViewingParallelRounds)
+    ? data.remoteViewingParallelRounds
+    : [];
+  data.remoteViewingParallelPredictions = Array.isArray(data.remoteViewingParallelPredictions)
+    ? data.remoteViewingParallelPredictions
+    : [];
 
   removeLegacyTemplateData(data);
   ensureDefaultTenant(data);
@@ -402,7 +432,9 @@ function normalizeStore(raw) {
     room: maxId(data.rooms) + 1,
     remoteRound: maxId(data.remoteViewingRounds) + 1,
     remotePrediction: maxId(data.remoteViewingPredictions) + 1,
-    remoteReserve: maxId(data.remoteViewingReserveItems) + 1
+    remoteReserve: maxId(data.remoteViewingReserveItems) + 1,
+    remoteParallelRound: maxId(data.remoteViewingParallelRounds) + 1,
+    remoteParallelPrediction: maxId(data.remoteViewingParallelPredictions) + 1
   };
 
   Object.keys(nextIds).forEach((key) => {
@@ -1564,6 +1596,490 @@ async function frontloadRemoteViewingReserveItems(targetAvailableCount) {
   };
 }
 
+function getParallelRoundByDate(roundDate, track) {
+  return (
+    store.remoteViewingParallelRounds.find((round) => round.roundDate === roundDate && round.track === track) || null
+  );
+}
+
+function getParallelRoundById(roundId) {
+  return store.remoteViewingParallelRounds.find((round) => round.id === roundId) || null;
+}
+
+function shouldGenerateDynamicRoundNow(round, forceGenerate = false) {
+  if (!round) {
+    return false;
+  }
+
+  if (forceGenerate) {
+    return true;
+  }
+
+  if (!round.generateAt) {
+    return true;
+  }
+
+  const generateAtMs = new Date(round.generateAt).getTime();
+  if (!Number.isFinite(generateAtMs)) {
+    return true;
+  }
+
+  return Date.now() >= generateAtMs;
+}
+
+function parallelGenerationToken(roundDate, track, roundId) {
+  return `${roundDate}-${track}-${roundId}`;
+}
+
+function createParallelRoundShell(roundDate, track) {
+  const round = {
+    id: nextId('remoteParallelRound'),
+    track,
+    roundDate,
+    targetTitle: '',
+    targetPrompt: '',
+    revisedPrompt: '',
+    imageFilename: '',
+    generatedAt: '',
+    generateAt: track === PARALLEL_TRACK_DYNAMIC ? dynamicGenerateAtForRoundDate(roundDate) : nowIso(),
+    revealAt: revealAtForRoundDate(roundDate),
+    imageModel: '',
+    promptModel: '',
+    judgeModel: '',
+    status: track === PARALLEL_TRACK_DYNAMIC ? 'awaiting-generation' : 'generating',
+    generationMode: '',
+    reserveItemId: null,
+    reserveUsedAt: '',
+    createdAt: nowIso()
+  };
+
+  store.remoteViewingParallelRounds.push(round);
+  persistStore();
+  return round;
+}
+
+const parallelGenerationLocks = new Map();
+let parallelScoringLock = null;
+
+async function ensureParallelRound(roundDate, track, options = {}) {
+  if (track !== PARALLEL_TRACK_DYNAMIC && track !== PARALLEL_TRACK_PRELOADED) {
+    throw new Error('Unsupported parallel remote-viewing track');
+  }
+
+  let existing = getParallelRoundByDate(roundDate, track);
+  if (existing && existing.imageFilename && existing.targetPrompt) {
+    return existing;
+  }
+
+  const lockKey = `${track}:${roundDate}`;
+  if (parallelGenerationLocks.has(lockKey)) {
+    return parallelGenerationLocks.get(lockKey);
+  }
+
+  const lockPromise = (async () => {
+    let round = getParallelRoundByDate(roundDate, track);
+    if (!round) {
+      round = createParallelRoundShell(roundDate, track);
+    }
+
+    const forceGenerate = options.forceGenerate === true;
+    const shouldGenerateNow =
+      track === PARALLEL_TRACK_PRELOADED || shouldGenerateDynamicRoundNow(round, forceGenerate);
+
+    if (!shouldGenerateNow) {
+      if (round.status !== 'awaiting-generation') {
+        round.status = 'awaiting-generation';
+        persistStore();
+      }
+      return round;
+    }
+
+    if (round.imageFilename && round.targetPrompt) {
+      return round;
+    }
+
+    if (!isRemoteViewingReady()) {
+      const providerError = new Error(
+        'No usable remote-viewing provider chain is configured for parallel generation.'
+      );
+      const reserveItem = claimReserveItemForRound(roundDate, providerError);
+      if (reserveItem) {
+        applyReservePayloadToRound(round, roundDate, reserveItem, providerError);
+        round.track = track;
+        persistStore();
+        return round;
+      }
+
+      round.status = 'generation-failed';
+      round.generationError = normalizeErrorMessage(providerError, 'Parallel generation failed');
+      persistStore();
+      throw providerError;
+    }
+
+    try {
+      const target = await generateRemoteViewingTarget(parallelGenerationToken(roundDate, track, round.id));
+      const image = await generateRemoteViewingImageFile(
+        roundDate,
+        `parallel-${track}-${round.id}`,
+        target.prompt
+      );
+      applyGeneratedPayloadToRound(round, roundDate, target, image);
+      round.track = track;
+      round.generateAt = track === PARALLEL_TRACK_DYNAMIC ? dynamicGenerateAtForRoundDate(roundDate) : round.generateAt;
+      delete round.generationError;
+      persistStore();
+      return round;
+    } catch (error) {
+      const reserveItem = claimReserveItemForRound(roundDate, error);
+      if (reserveItem) {
+        applyReservePayloadToRound(round, roundDate, reserveItem, error);
+        round.track = track;
+        persistStore();
+        return round;
+      }
+
+      round.status = 'generation-failed';
+      round.generationError = normalizeErrorMessage(error, 'Parallel generation failed');
+      persistStore();
+      throw error;
+    }
+  })();
+
+  parallelGenerationLocks.set(lockKey, lockPromise);
+  try {
+    return await lockPromise;
+  } finally {
+    parallelGenerationLocks.delete(lockKey);
+  }
+}
+
+function getLatestRevealedParallelRound(track) {
+  const nowMs = Date.now();
+  return (
+    store.remoteViewingParallelRounds
+      .filter(
+        (round) =>
+          round.track === track && round.imageFilename && round.targetPrompt && isRoundRevealed(round, nowMs)
+      )
+      .sort((a, b) => new Date(b.roundDate).getTime() - new Date(a.roundDate).getTime())[0] || null
+  );
+}
+
+function parallelRecordForUser(userId, track) {
+  const resolved = store.remoteViewingParallelPredictions.filter(
+    (prediction) =>
+      prediction.userId === userId &&
+      prediction.track === track &&
+      (prediction.outcome === 'win' || prediction.outcome === 'loss')
+  );
+
+  const wins = resolved.filter((prediction) => prediction.outcome === 'win').length;
+  const losses = resolved.filter((prediction) => prediction.outcome === 'loss').length;
+  const total = wins + losses;
+
+  return {
+    wins,
+    losses,
+    total,
+    winRate: total > 0 ? `${Math.round((wins / total) * 100)}%` : '0%'
+  };
+}
+
+function parallelLeaderboard(track, limit = 10) {
+  const scoreboard = new Map();
+
+  const increment = (userId, field) => {
+    if (!scoreboard.has(userId)) {
+      scoreboard.set(userId, { wins: 0, losses: 0 });
+    }
+    scoreboard.get(userId)[field] += 1;
+  };
+
+  store.remoteViewingParallelPredictions
+    .filter((prediction) => prediction.track === track)
+    .forEach((prediction) => {
+      if (prediction.outcome === 'win') {
+        increment(prediction.userId, 'wins');
+      } else if (prediction.outcome === 'loss') {
+        increment(prediction.userId, 'losses');
+      }
+    });
+
+  return [...scoreboard.entries()]
+    .map(([userId, tally]) => {
+      const user = store.users.find((entry) => entry.id === userId);
+      const total = tally.wins + tally.losses;
+      return {
+        userId,
+        userName: user ? user.name : `User ${userId}`,
+        wins: tally.wins,
+        losses: tally.losses,
+        total,
+        winRate: total > 0 ? `${Math.round((tally.wins / total) * 100)}%` : '0%'
+      };
+    })
+    .sort((a, b) => {
+      if (b.wins !== a.wins) {
+        return b.wins - a.wins;
+      }
+      if (a.losses !== b.losses) {
+        return a.losses - b.losses;
+      }
+      return a.userName.localeCompare(b.userName);
+    })
+    .slice(0, limit);
+}
+
+function serializeParallelRoundForDaily(round, userId = null, includeTarget = false) {
+  if (!round) {
+    return null;
+  }
+
+  const revealed = isRoundRevealed(round);
+  const myPrediction =
+    userId === null
+      ? null
+      : store.remoteViewingParallelPredictions.find(
+          (prediction) =>
+            prediction.roundId === round.id && prediction.track === round.track && prediction.userId === userId
+        ) || null;
+
+  return {
+    id: round.id,
+    track: round.track,
+    roundDate: round.roundDate,
+    generateAt: round.generateAt || null,
+    revealAt: round.revealAt,
+    status: revealed ? 'revealed' : round.status || 'hidden',
+    submissionOpen: !revealed,
+    generationScheduled: round.track === PARALLEL_TRACK_DYNAMIC && !round.imageFilename,
+    generatedAt: round.generatedAt || null,
+    promptProvider: round.promptProvider || null,
+    imageProvider: round.imageProvider || null,
+    judgeProvider: round.judgeProvider || null,
+    promptModel: round.promptModel || null,
+    imageModel: round.imageModel || null,
+    judgeModel: round.judgeModel || null,
+    imageFormat: round.imageFormat || null,
+    imageFallbackNote: round.imageFallbackNote || null,
+    generationMode: round.generationMode || 'live',
+    reserveItemId: Number.isFinite(Number(round.reserveItemId)) ? Number(round.reserveItemId) : null,
+    reserveUsedAt: round.reserveUsedAt || null,
+    myPrediction: myPrediction ? serializePrediction(myPrediction) : null,
+    imageUrl: includeTarget && revealed ? `/api/remote-viewing/parallel/rounds/${round.id}/image` : null,
+    targetTitle: includeTarget && revealed ? round.targetTitle : null,
+    targetPrompt: includeTarget && revealed ? round.targetPrompt : null
+  };
+}
+
+function parallelTrackAggregate(track) {
+  const resolved = store.remoteViewingParallelPredictions.filter(
+    (prediction) =>
+      prediction.track === track && (prediction.outcome === 'win' || prediction.outcome === 'loss')
+  );
+
+  const wins = resolved.filter((prediction) => prediction.outcome === 'win').length;
+  const losses = resolved.filter((prediction) => prediction.outcome === 'loss').length;
+  const total = wins + losses;
+  const winRatePct = total > 0 ? Number(((wins / total) * 100).toFixed(2)) : 0;
+
+  return {
+    wins,
+    losses,
+    total,
+    winRate: total > 0 ? `${Math.round(winRatePct)}%` : '0%',
+    winRatePct
+  };
+}
+
+async function scorePendingParallelPredictions() {
+  if (!isRemoteViewingReady()) {
+    return;
+  }
+
+  if (parallelScoringLock) {
+    await parallelScoringLock;
+    return;
+  }
+
+  parallelScoringLock = (async () => {
+    const nowMs = Date.now();
+    let changed = false;
+
+    const revealedRounds = store.remoteViewingParallelRounds.filter(
+      (round) => round.imageFilename && round.targetPrompt && isRoundRevealed(round, nowMs)
+    );
+
+    for (const round of revealedRounds) {
+      round.status = 'revealed';
+      const pendingPredictions = store.remoteViewingParallelPredictions.filter(
+        (prediction) => prediction.roundId === round.id && !prediction.outcome
+      );
+
+      for (const prediction of pendingPredictions) {
+        try {
+          const judged = await judgePredictionWithAi(prediction.prediction, round);
+          prediction.outcome = judged.outcome;
+          prediction.score = judged.score;
+          prediction.rationale = judged.rationale;
+          prediction.scoredAt = nowIso();
+          prediction.judgeProvider = judged.provider;
+          prediction.judgeModel = judged.model;
+          round.judgeProvider = judged.provider;
+          round.judgeModel = judged.model;
+          delete prediction.judgeError;
+          changed = true;
+        } catch (error) {
+          prediction.judgeError = safeTrim(error.message, 300);
+          prediction.scoreAttempts = Number(prediction.scoreAttempts || 0) + 1;
+          prediction.lastScoreAttemptAt = nowIso();
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      persistStore();
+    }
+  })();
+
+  try {
+    await parallelScoringLock;
+  } finally {
+    parallelScoringLock = null;
+  }
+}
+
+async function frontloadParallelPreloadedRounds(days, startDate) {
+  const start = startDate ? parseRoundDate(startDate) : parseRoundDate(dateKeyUtc());
+  const totalDays = clampNumber(Number(days) || PARALLEL_PRELOAD_DEFAULT_DAYS, 1, 730);
+  const generated = [];
+  const existing = [];
+  const failed = [];
+
+  for (let offset = 0; offset < totalDays; offset += 1) {
+    const targetDate = new Date(start.getTime());
+    targetDate.setUTCDate(start.getUTCDate() + offset);
+    const roundDate = dateKeyUtc(targetDate);
+
+    try {
+      const round = getParallelRoundByDate(roundDate, PARALLEL_TRACK_PRELOADED);
+      if (round && round.imageFilename && round.targetPrompt) {
+        existing.push(roundDate);
+        continue;
+      }
+
+      const ensured = await ensureParallelRound(roundDate, PARALLEL_TRACK_PRELOADED, { forceGenerate: true });
+      generated.push({
+        roundDate,
+        roundId: ensured.id,
+        generationMode: ensured.generationMode || 'live',
+        reserveItemId: Number.isFinite(Number(ensured.reserveItemId)) ? Number(ensured.reserveItemId) : null
+      });
+    } catch (error) {
+      failed.push({
+        roundDate,
+        error: normalizeErrorMessage(error, 'Parallel preloaded generation failed')
+      });
+    }
+  }
+
+  return {
+    requestedDays: totalDays,
+    startDate: dateKeyUtc(start),
+    generatedCount: generated.length,
+    existingCount: existing.length,
+    failedCount: failed.length,
+    reserveTakeoverCount: generated.filter((entry) => entry.generationMode === 'reserve').length,
+    generated,
+    existing,
+    failed
+  };
+}
+
+async function ensureParallelTodayRounds() {
+  const today = dateKeyUtc();
+  let dynamicRound = getParallelRoundByDate(today, PARALLEL_TRACK_DYNAMIC);
+  let preloadedRound = getParallelRoundByDate(today, PARALLEL_TRACK_PRELOADED);
+  const errors = [];
+
+  try {
+    dynamicRound = await ensureParallelRound(today, PARALLEL_TRACK_DYNAMIC);
+  } catch (error) {
+    errors.push(`dynamic: ${normalizeErrorMessage(error, 'generation failed')}`);
+  }
+
+  try {
+    preloadedRound = await ensureParallelRound(today, PARALLEL_TRACK_PRELOADED, { forceGenerate: true });
+  } catch (error) {
+    errors.push(`preloaded: ${normalizeErrorMessage(error, 'generation failed')}`);
+  }
+
+  return { dynamicRound, preloadedRound, errors };
+}
+
+async function buildParallelRemoteViewingPayload(userId = null) {
+  const reserve = reserveInventorySummary();
+  const providerReady = isRemoteViewingReady();
+  let engineMessage = providerReady
+    ? 'Parallel test tracks online.'
+    : reserve.available > 0
+      ? 'Provider chain degraded; reserve backup available for takeover.'
+      : 'Provider chain unavailable and no reserve images are available.';
+
+  const { dynamicRound, preloadedRound, errors } = await ensureParallelTodayRounds();
+  if (errors.length > 0) {
+    engineMessage = `${engineMessage} ${errors.join(' | ')}`;
+  }
+
+  if (providerReady) {
+    try {
+      await scorePendingParallelPredictions();
+    } catch (error) {
+      engineMessage = `${engineMessage} Scoring warning: ${normalizeErrorMessage(error, 'parallel scoring failed')}`;
+    }
+  }
+
+  const dynamicRevealed = getLatestRevealedParallelRound(PARALLEL_TRACK_DYNAMIC);
+  const preloadedRevealed = getLatestRevealedParallelRound(PARALLEL_TRACK_PRELOADED);
+  const dynamicStats = parallelTrackAggregate(PARALLEL_TRACK_DYNAMIC);
+  const preloadedStats = parallelTrackAggregate(PARALLEL_TRACK_PRELOADED);
+
+  return {
+    engine: {
+      providerReady,
+      reserve,
+      message: engineMessage,
+      dynamicGenerateAtUtc: `${String(PARALLEL_DYNAMIC_GENERATE_HOUR_UTC).padStart(2, '0')}:${String(
+        PARALLEL_DYNAMIC_GENERATE_MINUTE_UTC
+      ).padStart(2, '0')}`,
+      preloadedDefaultDays: PARALLEL_PRELOAD_DEFAULT_DAYS
+    },
+    tracks: {
+      dynamic: {
+        today: serializeParallelRoundForDaily(dynamicRound, userId, false),
+        revealed: serializeParallelRoundForDaily(dynamicRevealed, userId, true),
+        record: userId === null ? { wins: 0, losses: 0, total: 0, winRate: '0%' } : parallelRecordForUser(userId, PARALLEL_TRACK_DYNAMIC),
+        leaderboard: parallelLeaderboard(PARALLEL_TRACK_DYNAMIC, 8)
+      },
+      preloaded: {
+        today: serializeParallelRoundForDaily(preloadedRound, userId, false),
+        revealed: serializeParallelRoundForDaily(preloadedRevealed, userId, true),
+        record:
+          userId === null
+            ? { wins: 0, losses: 0, total: 0, winRate: '0%' }
+            : parallelRecordForUser(userId, PARALLEL_TRACK_PRELOADED),
+        leaderboard: parallelLeaderboard(PARALLEL_TRACK_PRELOADED, 8)
+      }
+    },
+    comparison: {
+      dynamic: dynamicStats,
+      preloaded: preloadedStats,
+      deltaWinRatePct: Number((preloadedStats.winRatePct - dynamicStats.winRatePct).toFixed(2))
+    }
+  };
+}
+
 function serializePrediction(prediction) {
   return {
     id: prediction.id,
@@ -2164,6 +2680,13 @@ async function handleApi(req, res, pathname, searchParams) {
     return;
   }
 
+  if (req.method === 'GET' && pathname === '/api/remote-viewing/parallel/daily') {
+    const auth = getAuthContext(req);
+    const payload = await buildParallelRemoteViewingPayload(auth.user?.id || null);
+    sendJson(res, 200, payload);
+    return;
+  }
+
   if (req.method === 'POST' && pathname === '/api/remote-viewing/frontload') {
     const auth = requireAuth(req, res);
     if (!auth) {
@@ -2184,6 +2707,29 @@ async function handleApi(req, res, pathname, searchParams) {
 
     const result = await frontloadRemoteViewingRounds(days, startDate || dateKeyUtc());
     await maybeAutoPostRevealedRoundsToX();
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/remote-viewing/parallel/frontload-preloaded') {
+    const auth = requireAuth(req, res);
+    if (!auth) {
+      return;
+    }
+
+    const body = await parseJsonBody(req);
+    const days = clampNumber(Number(body.days) || PARALLEL_PRELOAD_DEFAULT_DAYS, 1, 730);
+    const startDate = body.startDate ? safeTrim(body.startDate, 10) : '';
+    if (startDate) {
+      try {
+        parseRoundDate(startDate);
+      } catch (_error) {
+        sendError(res, 400, 'Invalid startDate format. Use YYYY-MM-DD.');
+        return;
+      }
+    }
+
+    const result = await frontloadParallelPreloadedRounds(days, startDate || dateKeyUtc());
     sendJson(res, 200, result);
     return;
   }
@@ -2289,7 +2835,129 @@ async function handleApi(req, res, pathname, searchParams) {
     return;
   }
 
+  if (req.method === 'POST' && pathname === '/api/remote-viewing/parallel/predictions') {
+    const auth = requireAuth(req, res);
+    if (!auth) {
+      return;
+    }
+
+    const body = await parseJsonBody(req);
+    const track = safeTrim(body.track, 24).toLowerCase();
+    const predictionText = safeTrim(body.prediction, 1200);
+
+    if (track !== PARALLEL_TRACK_DYNAMIC && track !== PARALLEL_TRACK_PRELOADED) {
+      sendError(res, 400, 'Track must be dynamic or preloaded');
+      return;
+    }
+
+    if (predictionText.length < 8) {
+      sendError(res, 400, 'Prediction must be at least 8 characters long');
+      return;
+    }
+
+    let todayRound;
+    try {
+      todayRound = await ensureParallelRound(dateKeyUtc(), track, {
+        forceGenerate: track === PARALLEL_TRACK_PRELOADED
+      });
+    } catch (error) {
+      sendError(
+        res,
+        503,
+        normalizeErrorMessage(
+          error,
+          'Parallel remote-viewing generation is currently unavailable. Refill reserve or restore provider access.'
+        )
+      );
+      return;
+    }
+
+    if (!todayRound) {
+      sendError(res, 500, 'Unable to initialize today\'s parallel remote viewing round');
+      return;
+    }
+
+    if (isRoundRevealed(todayRound)) {
+      sendError(res, 400, 'Predictions are closed for this track today. Wait for the next round.');
+      return;
+    }
+
+    const existing = store.remoteViewingParallelPredictions.find(
+      (prediction) =>
+        prediction.roundId === todayRound.id && prediction.userId === auth.user.id && prediction.track === track
+    );
+
+    if (existing) {
+      existing.prediction = predictionText;
+      existing.updatedAt = nowIso();
+      existing.outcome = '';
+      existing.score = null;
+      existing.rationale = '';
+      existing.scoredAt = null;
+      delete existing.judgeError;
+      delete existing.scoreAttempts;
+      delete existing.lastScoreAttemptAt;
+
+      persistStore();
+      sendJson(res, 200, { prediction: serializePrediction(existing) });
+      return;
+    }
+
+    const prediction = {
+      id: nextId('remoteParallelPrediction'),
+      roundId: todayRound.id,
+      userId: auth.user.id,
+      track,
+      prediction: predictionText,
+      createdAt: nowIso(),
+      outcome: '',
+      score: null,
+      rationale: '',
+      scoredAt: null
+    };
+
+    store.remoteViewingParallelPredictions.push(prediction);
+    persistStore();
+    sendJson(res, 201, { prediction: serializePrediction(prediction) });
+    return;
+  }
+
   const roundImageMatch = pathname.match(/^\/api\/remote-viewing\/rounds\/(\d+)\/image$/);
+  const parallelRoundImageMatch = pathname.match(/^\/api\/remote-viewing\/parallel\/rounds\/(\d+)\/image$/);
+  if (req.method === 'GET' && parallelRoundImageMatch) {
+    const roundId = Number(parallelRoundImageMatch[1]);
+    const round = getParallelRoundById(roundId);
+    if (!round) {
+      sendError(res, 404, 'Parallel remote viewing round not found');
+      return;
+    }
+
+    if (!isRoundRevealed(round)) {
+      sendError(res, 403, 'Image is locked until reveal time');
+      return;
+    }
+
+    const imageFile = getRoundImageFile(round);
+    if (!imageFile) {
+      sendError(res, 404, 'Image file not found');
+      return;
+    }
+
+    fs.readFile(imageFile.absolutePath, (error, data) => {
+      if (error) {
+        sendError(res, 500, 'Unable to read image file');
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': imageFile.contentType,
+        'Cache-Control': 'no-store'
+      });
+      res.end(data);
+    });
+    return;
+  }
+
   if (req.method === 'GET' && roundImageMatch) {
     const roundId = Number(roundImageMatch[1]);
     const round = store.remoteViewingRounds.find((item) => item.id === roundId);
@@ -2737,6 +3405,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 let xAutoPostTimer = null;
+let parallelDynamicTimer = null;
 
 function startXAutoPostLoop() {
   if (!X_AUTOPOST_ENABLED) {
@@ -2757,6 +3426,21 @@ function startXAutoPostLoop() {
   }, X_AUTOPOST_INTERVAL_MS);
 }
 
+async function maybeGenerateParallelDynamicRound() {
+  try {
+    await ensureParallelRound(dateKeyUtc(), PARALLEL_TRACK_DYNAMIC);
+  } catch (error) {
+    console.error('Parallel dynamic generation loop error:', error);
+  }
+}
+
+function startParallelDynamicLoop() {
+  void maybeGenerateParallelDynamicRound();
+  parallelDynamicTimer = setInterval(() => {
+    void maybeGenerateParallelDynamicRound();
+  }, 60_000);
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`SignalScope platform running on ${HOST}:${PORT}`);
   const order = buildFailoverOrder();
@@ -2775,5 +3459,12 @@ server.listen(PORT, HOST, () => {
       hasXCredentials() ? 'present' : 'missing'
     }`
   );
+  console.log(
+    `Parallel dynamic generation schedule (UTC): ${String(PARALLEL_DYNAMIC_GENERATE_HOUR_UTC).padStart(2, '0')}:${String(
+      PARALLEL_DYNAMIC_GENERATE_MINUTE_UTC
+    ).padStart(2, '0')}`
+  );
+  console.log(`Parallel preloaded frontload default days: ${PARALLEL_PRELOAD_DEFAULT_DAYS}`);
   startXAutoPostLoop();
+  startParallelDynamicLoop();
 });

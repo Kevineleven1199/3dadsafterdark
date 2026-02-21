@@ -603,6 +603,23 @@ textarea {
   align-items: center;
 }
 
+.rv-parallel {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 0.7rem;
+}
+
+.rv-parallel-grid .rv-card {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+#rv-parallel-dynamic-prediction,
+#rv-parallel-preloaded-prediction {
+  min-height: 96px;
+}
+
 .post-form {
   margin-top: 0.75rem;
   display: grid;

@@ -27,6 +27,10 @@ Targets are generated on the day, hidden until the next day, then scored for win
   - Frontload endpoint for a month (or custom span) of rounds
   - Reserve image pool endpoint to pre-generate emergency backup targets
   - Automatic reserve takeover if live daily image generation fails
+  - Parallel experiment tracks:
+    - `dynamic` track: image generated at a fixed daily UTC schedule (default 08:55 UTC)
+    - `preloaded` track: up to 365-day preloaded control images
+    - side-by-side scoring and win-rate delta comparison
   - Optional X auto-posting for revealed rounds
 
 ## No Template Mock Data
@@ -67,6 +71,9 @@ At least one full provider chain is needed:
 - `X_AUTOPOST_INTERVAL_MS` (default `900000`)
 - `X_API_BASE_URL` (default `https://api.x.com`)
 - `X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`
+- `PARALLEL_DYNAMIC_GENERATE_HOUR_UTC` (default `8`)
+- `PARALLEL_DYNAMIC_GENERATE_MINUTE_UTC` (default `55`)
+- `PARALLEL_PRELOAD_DEFAULT_DAYS` (default `365`)
 
 ## Run Locally
 
@@ -115,5 +122,11 @@ ANTHROPIC_API_KEY=... OPENROUTER_API_KEY=... HOST=127.0.0.1 PORT=3001 DATA_DIR=/
 - `POST /api/remote-viewing/frontload`
 - `POST /api/remote-viewing/reserve/frontload`
   - Body: `{ "targetAvailable": 30 }` (tops up unused reserve images to target)
+- `GET /api/remote-viewing/parallel/daily`
+- `POST /api/remote-viewing/parallel/predictions`
+  - Body: `{ "track": "dynamic" | "preloaded", "prediction": "..." }`
+- `POST /api/remote-viewing/parallel/frontload-preloaded`
+  - Body: `{ "days": 365, "startDate": "YYYY-MM-DD" }` (`startDate` optional)
+- `GET /api/remote-viewing/parallel/rounds/:id/image`
 - `GET /api/remote-viewing/rounds/:id/image`
 - `POST /api/remote-viewing/rounds/:id/x-post`

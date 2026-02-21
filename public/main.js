@@ -16,7 +16,8 @@ const state = {
   posts: [],
   filter: 'all',
   sort: 'hot',
-  remoteViewing: null
+  remoteViewing: null,
+  parallelRemoteViewing: null
 };
 
 const nodes = {
@@ -63,6 +64,20 @@ const nodes = {
   rvReserveFrontloadBtn: document.getElementById('rv-reserve-frontload-btn'),
   rvXPostBtn: document.getElementById('rv-x-post-btn'),
   rvAdminFeedback: document.getElementById('rv-admin-feedback'),
+  rvParallelNote: document.getElementById('rv-parallel-note'),
+  rvParallelDynamicForm: document.getElementById('rv-parallel-dynamic-form'),
+  rvParallelDynamicPrediction: document.getElementById('rv-parallel-dynamic-prediction'),
+  rvParallelDynamicMeta: document.getElementById('rv-parallel-dynamic-meta'),
+  rvParallelDynamicFeedback: document.getElementById('rv-parallel-dynamic-feedback'),
+  rvParallelDynamicRecord: document.getElementById('rv-parallel-dynamic-record'),
+  rvParallelPreloadedForm: document.getElementById('rv-parallel-preloaded-form'),
+  rvParallelPreloadedPrediction: document.getElementById('rv-parallel-preloaded-prediction'),
+  rvParallelPreloadedMeta: document.getElementById('rv-parallel-preloaded-meta'),
+  rvParallelPreloadedFeedback: document.getElementById('rv-parallel-preloaded-feedback'),
+  rvParallelPreloadedRecord: document.getElementById('rv-parallel-preloaded-record'),
+  rvParallelFrontloadBtn: document.getElementById('rv-parallel-frontload-btn'),
+  rvParallelFeedback: document.getElementById('rv-parallel-feedback'),
+  rvParallelComparison: document.getElementById('rv-parallel-comparison'),
   year: document.getElementById('current-year')
 };
 
@@ -554,6 +569,103 @@ function renderRemoteViewing() {
   }
 }
 
+function renderParallelTrackSummary(trackPayload, metaNode, recordNode, predictionNode, formNode) {
+  if (!metaNode || !recordNode) {
+    return;
+  }
+
+  const today = trackPayload?.today;
+  const revealed = trackPayload?.revealed;
+  const record = trackPayload?.record || { wins: 0, losses: 0, total: 0, winRate: '0%' };
+
+  if (!today) {
+    metaNode.textContent = 'Today\'s round is initializing.';
+  } else if (today.generationScheduled) {
+    metaNode.textContent = `Round ${today.roundDate}. Image scheduled at ${formatTimestamp(today.generateAt)} and reveal at ${formatTimestamp(today.revealAt)}.`;
+  } else {
+    metaNode.textContent = `Round ${today.roundDate}. Reveal at ${formatTimestamp(today.revealAt)}.`;
+  }
+
+  if (today?.myPrediction && predictionNode) {
+    predictionNode.value = today.myPrediction.prediction || '';
+  }
+
+  if (formNode) {
+    const controls = Array.from(formNode.querySelectorAll('textarea, button'));
+    const canSubmit = Boolean(state.user && today && today.submissionOpen);
+    controls.forEach((element) => {
+      element.disabled = !canSubmit;
+    });
+  }
+
+  let revealedLine = 'No revealed round yet.';
+  if (revealed) {
+    if (revealed.myPrediction?.outcome === 'win') {
+      revealedLine = `Latest revealed ${revealed.roundDate}: Win (${revealed.myPrediction.score ?? 'n/a'}).`;
+    } else if (revealed.myPrediction?.outcome === 'loss') {
+      revealedLine = `Latest revealed ${revealed.roundDate}: Loss (${revealed.myPrediction.score ?? 'n/a'}).`;
+    } else if (revealed.myPrediction) {
+      revealedLine = `Latest revealed ${revealed.roundDate}: submitted, scoring pending.`;
+    } else {
+      revealedLine = `Latest revealed ${revealed.roundDate}: no prediction submitted.`;
+    }
+  }
+
+  recordNode.textContent = `${record.wins}W ${record.losses}L (${record.winRate}) across ${record.total} scored rounds. ${revealedLine}`;
+}
+
+function renderParallelRemoteViewing() {
+  if (!nodes.rvParallelNote) {
+    return;
+  }
+
+  const payload = state.parallelRemoteViewing;
+  if (!payload) {
+    nodes.rvParallelNote.textContent = 'Loading parallel experiment tracks...';
+    return;
+  }
+
+  const engine = payload.engine || {};
+  const tracks = payload.tracks || {};
+  const dynamicTrack = tracks.dynamic || {};
+  const preloadedTrack = tracks.preloaded || {};
+  const comparison = payload.comparison || {};
+
+  nodes.rvParallelNote.textContent =
+    `${engine.message || ''} Dynamic generation at ${engine.dynamicGenerateAtUtc || '08:55'} UTC. ` +
+    `Preloaded control target depth: ${engine.preloadedDefaultDays || 365} days.`;
+
+  renderParallelTrackSummary(
+    dynamicTrack,
+    nodes.rvParallelDynamicMeta,
+    nodes.rvParallelDynamicRecord,
+    nodes.rvParallelDynamicPrediction,
+    nodes.rvParallelDynamicForm
+  );
+  renderParallelTrackSummary(
+    preloadedTrack,
+    nodes.rvParallelPreloadedMeta,
+    nodes.rvParallelPreloadedRecord,
+    nodes.rvParallelPreloadedPrediction,
+    nodes.rvParallelPreloadedForm
+  );
+
+  if (nodes.rvParallelFrontloadBtn) {
+    nodes.rvParallelFrontloadBtn.disabled = !Boolean(state.user);
+  }
+
+  if (nodes.rvParallelComparison) {
+    const dynamic = comparison.dynamic || { winRate: '0%', total: 0 };
+    const preloaded = comparison.preloaded || { winRate: '0%', total: 0 };
+    const delta = Number.isFinite(Number(comparison.deltaWinRatePct))
+      ? Number(comparison.deltaWinRatePct)
+      : 0;
+    nodes.rvParallelComparison.textContent =
+      `Dynamic ${dynamic.winRate} (${dynamic.total} scored) vs Preloaded ${preloaded.winRate} (${preloaded.total} scored). ` +
+      `Delta preloaded-dynamic: ${delta.toFixed(2)} percentage points.`;
+  }
+}
+
 function renderAll() {
   renderAuth();
   renderTenantSelector();
@@ -562,6 +674,7 @@ function renderAll() {
   renderChannels();
   renderHotTags();
   renderRemoteViewing();
+  renderParallelRemoteViewing();
   renderFilterButtons();
   renderFeed();
   renderCases();
@@ -653,9 +766,42 @@ async function loadRemoteViewing() {
   }
 }
 
+async function loadParallelRemoteViewing() {
+  try {
+    const payload = await apiRequest('/api/remote-viewing/parallel/daily');
+    state.parallelRemoteViewing = payload;
+  } catch (error) {
+    state.parallelRemoteViewing = {
+      engine: {
+        providerReady: false,
+        message: error.message || 'Parallel remote-viewing endpoint unavailable.',
+        dynamicGenerateAtUtc: '08:55',
+        preloadedDefaultDays: 365
+      },
+      tracks: {
+        dynamic: {
+          today: null,
+          revealed: null,
+          record: { wins: 0, losses: 0, total: 0, winRate: '0%' }
+        },
+        preloaded: {
+          today: null,
+          revealed: null,
+          record: { wins: 0, losses: 0, total: 0, winRate: '0%' }
+        }
+      },
+      comparison: {
+        dynamic: { wins: 0, losses: 0, total: 0, winRate: '0%', winRatePct: 0 },
+        preloaded: { wins: 0, losses: 0, total: 0, winRate: '0%', winRatePct: 0 },
+        deltaWinRatePct: 0
+      }
+    };
+  }
+}
+
 async function refreshAllData() {
   await loadTenants();
-  await Promise.all([loadTenantData(), loadRemoteViewing()]);
+  await Promise.all([loadTenantData(), loadRemoteViewing(), loadParallelRemoteViewing()]);
 }
 
 async function withRefresh(task, feedbackNode) {
@@ -818,7 +964,7 @@ async function handleCreateTenant(event) {
     state.tenantId = Number(payload.tenant.id);
     state.filter = 'all';
     state.sort = 'new';
-    await Promise.all([loadTenantData(), loadRemoteViewing()]);
+    await Promise.all([loadTenantData(), loadRemoteViewing(), loadParallelRemoteViewing()]);
     renderAll();
   } catch (error) {
     setFeedback(nodes.tenantFeedback, error.message, 'error');
@@ -933,6 +1079,46 @@ async function handleRemoteXPost() {
       'success'
     );
   }, nodes.rvAdminFeedback);
+}
+
+async function handleParallelPredictionSubmit(track, predictionNode, feedbackNode) {
+  if (!predictionNode || !requireSession(feedbackNode)) {
+    return;
+  }
+
+  const prediction = String(predictionNode.value || '').trim();
+  if (prediction.length < 8) {
+    setFeedback(feedbackNode, 'Prediction must be at least 8 characters.', 'error');
+    return;
+  }
+
+  await withRefresh(async () => {
+    await apiRequest('/api/remote-viewing/parallel/predictions', {
+      method: 'POST',
+      body: { track, prediction }
+    });
+
+    const label = track === 'dynamic' ? 'Dynamic' : 'Preloaded';
+    setFeedback(feedbackNode, `${label} track prediction submitted.`, 'success');
+  }, feedbackNode);
+}
+
+async function handleParallelPreloadedFrontload() {
+  if (!requireSession(nodes.rvParallelFeedback)) {
+    return;
+  }
+
+  await withRefresh(async () => {
+    const result = await apiRequest('/api/remote-viewing/parallel/frontload-preloaded', {
+      method: 'POST',
+      body: { days: 365 }
+    });
+    setFeedback(
+      nodes.rvParallelFeedback,
+      `Parallel preloaded frontload: ${result.generatedCount} generated, ${result.existingCount} existing, ${result.failedCount} failed.`,
+      result.failedCount > 0 ? 'error' : 'success'
+    );
+  }, nodes.rvParallelFeedback);
 }
 
 async function handleFeedClick(event) {
@@ -1114,6 +1300,34 @@ function setupEvents() {
   if (nodes.rvXPostBtn) {
     nodes.rvXPostBtn.addEventListener('click', () => {
       void handleRemoteXPost();
+    });
+  }
+
+  if (nodes.rvParallelDynamicForm) {
+    nodes.rvParallelDynamicForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void handleParallelPredictionSubmit(
+        'dynamic',
+        nodes.rvParallelDynamicPrediction,
+        nodes.rvParallelDynamicFeedback
+      );
+    });
+  }
+
+  if (nodes.rvParallelPreloadedForm) {
+    nodes.rvParallelPreloadedForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void handleParallelPredictionSubmit(
+        'preloaded',
+        nodes.rvParallelPreloadedPrediction,
+        nodes.rvParallelPreloadedFeedback
+      );
+    });
+  }
+
+  if (nodes.rvParallelFrontloadBtn) {
+    nodes.rvParallelFrontloadBtn.addEventListener('click', () => {
+      void handleParallelPreloadedFrontload();
     });
   }
 
