@@ -18,7 +18,8 @@ const state = {
   filter: 'all',
   sort: 'hot',
   remoteViewing: null,
-  parallelRemoteViewing: null
+  parallelRemoteViewing: null,
+  communityViewing: null
 };
 
 const nodes = {
@@ -80,6 +81,22 @@ const nodes = {
   rvParallelFrontloadBtn: document.getElementById('rv-parallel-frontload-btn'),
   rvParallelFeedback: document.getElementById('rv-parallel-feedback'),
   rvParallelComparison: document.getElementById('rv-parallel-comparison'),
+  rvCommunityNote: document.getElementById('rv-community-note'),
+  rvCommunityCreateForm: document.getElementById('rv-community-create-form'),
+  rvCommunityTitle: document.getElementById('rv-community-title'),
+  rvCommunityBriefingInput: document.getElementById('rv-community-briefing-input'),
+  rvCommunityRevealHours: document.getElementById('rv-community-reveal-hours'),
+  rvCommunityImageInput: document.getElementById('rv-community-image-input'),
+  rvCommunityCreateFeedback: document.getElementById('rv-community-create-feedback'),
+  rvCommunityActiveMeta: document.getElementById('rv-community-active-meta'),
+  rvCommunityPredictionForm: document.getElementById('rv-community-prediction-form'),
+  rvCommunityPrediction: document.getElementById('rv-community-prediction'),
+  rvCommunityPredictionFeedback: document.getElementById('rv-community-prediction-feedback'),
+  rvCommunityRevealedMeta: document.getElementById('rv-community-revealed-meta'),
+  rvCommunityImageShell: document.getElementById('rv-community-image-shell'),
+  rvCommunityImage: document.getElementById('rv-community-image'),
+  rvCommunityBriefing: document.getElementById('rv-community-briefing'),
+  rvCommunityPredictionsList: document.getElementById('rv-community-predictions-list'),
   year: document.getElementById('current-year'),
   abductionIntro: document.getElementById('abduction-intro'),
   introEnterBtn: document.getElementById('intro-enter-btn'),
@@ -126,6 +143,19 @@ function setFeedback(node, message, tone = 'neutral') {
   } else if (tone === 'success') {
     node.classList.add('success');
   }
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve(String(reader.result || ''));
+    };
+    reader.onerror = () => {
+      reject(new Error('Unable to read selected image file'));
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function setupAbductionIntro() {
@@ -787,6 +817,110 @@ function renderParallelRemoteViewing() {
   }
 }
 
+function renderCommunityViewing() {
+  if (
+    !nodes.rvCommunityNote ||
+    !nodes.rvCommunityActiveMeta ||
+    !nodes.rvCommunityPredictionForm ||
+    !nodes.rvCommunityRevealedMeta ||
+    !nodes.rvCommunityPredictionsList
+  ) {
+    return;
+  }
+
+  const payload = state.communityViewing;
+  if (!payload) {
+    nodes.rvCommunityNote.textContent = 'Loading tenant community rounds...';
+    return;
+  }
+
+  if (payload.error) {
+    nodes.rvCommunityNote.textContent = payload.error;
+  }
+
+  const active = payload.active;
+  const revealed = payload.revealed;
+  const tenantName = state.tenantDetail?.name || 'this tenant';
+  const canCreateRound = Boolean(state.user && state.tenantId);
+  nodes.rvCommunityNote.textContent =
+    `Community rounds are scoped to ${tenantName}. Upload a real photo, lock guesses, then reveal on schedule.`;
+
+  if (nodes.rvCommunityCreateForm) {
+    const controls = Array.from(nodes.rvCommunityCreateForm.querySelectorAll('input, textarea, button'));
+    controls.forEach((element) => {
+      element.disabled = !canCreateRound;
+    });
+  }
+
+  if (active) {
+    nodes.rvCommunityActiveMeta.textContent =
+      `${active.title} • ${active.submissionCount} guess${active.submissionCount === 1 ? '' : 'es'} • ` +
+      `reveals ${formatTimestamp(active.revealAt)} • posted by ${active.createdBy?.name || 'Unknown'}.`;
+  } else {
+    nodes.rvCommunityActiveMeta.textContent = 'No active community round. Start one with your own photo.';
+  }
+
+  const canSubmitPrediction = Boolean(state.user && active && active.submissionOpen);
+  const predictionControls = Array.from(
+    nodes.rvCommunityPredictionForm.querySelectorAll('textarea, button')
+  );
+  predictionControls.forEach((element) => {
+    element.disabled = !canSubmitPrediction;
+  });
+
+  if (nodes.rvCommunityPrediction) {
+    nodes.rvCommunityPrediction.value = active?.myPrediction?.prediction || '';
+  }
+
+  if (!state.user && nodes.rvCommunityPredictionFeedback && !nodes.rvCommunityPredictionFeedback.textContent) {
+    setFeedback(nodes.rvCommunityPredictionFeedback, 'Log in to submit a community guess.', 'error');
+  }
+
+  if (revealed) {
+    nodes.rvCommunityRevealedMeta.textContent =
+      `${revealed.title} • revealed ${formatTimestamp(revealed.revealAt)} • ` +
+      `${revealed.submissionCount} total guess${revealed.submissionCount === 1 ? '' : 'es'}.`;
+
+    if (nodes.rvCommunityImageShell && nodes.rvCommunityImage) {
+      if (revealed.imageUrl) {
+        nodes.rvCommunityImage.src = revealed.imageUrl;
+        nodes.rvCommunityImageShell.hidden = false;
+      } else {
+        nodes.rvCommunityImageShell.hidden = true;
+      }
+    }
+
+    if (nodes.rvCommunityBriefing) {
+      nodes.rvCommunityBriefing.textContent = revealed.briefing
+        ? `Briefing: ${revealed.briefing}`
+        : 'No additional briefing was provided for this round.';
+    }
+
+    const predictions = Array.isArray(revealed.predictions) ? revealed.predictions : [];
+    if (predictions.length === 0) {
+      nodes.rvCommunityPredictionsList.innerHTML = '<li>No guesses were submitted for this round.</li>';
+    } else {
+      nodes.rvCommunityPredictionsList.innerHTML = predictions
+        .map((entry) => {
+          const text = String(entry.prediction || '');
+          const clipped = text.length > 260 ? `${text.slice(0, 257)}...` : text;
+          return `<li><strong>${escapeHtml(entry.userName || 'Unknown')}</strong> • ${escapeHtml(clipped)}</li>`;
+        })
+        .join('');
+    }
+  } else {
+    nodes.rvCommunityRevealedMeta.textContent =
+      'No revealed community rounds yet. Create one and set a reveal timer.';
+    if (nodes.rvCommunityImageShell) {
+      nodes.rvCommunityImageShell.hidden = true;
+    }
+    if (nodes.rvCommunityBriefing) {
+      nodes.rvCommunityBriefing.textContent = '';
+    }
+    nodes.rvCommunityPredictionsList.innerHTML = '<li>Revealed guesses will appear here.</li>';
+  }
+}
+
 function renderAll() {
   renderAuth();
   renderTenantSelector();
@@ -797,6 +931,7 @@ function renderAll() {
   renderHotTags();
   renderRemoteViewing();
   renderParallelRemoteViewing();
+  renderCommunityViewing();
   renderFilterButtons();
   renderFeed();
   renderCases();
@@ -921,9 +1056,28 @@ async function loadParallelRemoteViewing() {
   }
 }
 
+async function loadCommunityViewing() {
+  if (!state.tenantId) {
+    state.communityViewing = null;
+    return;
+  }
+
+  try {
+    const payload = await apiRequest(`/api/tenants/${state.tenantId}/community-viewing`);
+    state.communityViewing = payload;
+  } catch (error) {
+    state.communityViewing = {
+      active: null,
+      revealed: null,
+      queue: [],
+      error: error.message || 'Community viewing endpoint unavailable.'
+    };
+  }
+}
+
 async function refreshAllData() {
   await loadTenants();
-  await Promise.all([loadTenantData(), loadRemoteViewing(), loadParallelRemoteViewing()]);
+  await Promise.all([loadTenantData(), loadRemoteViewing(), loadParallelRemoteViewing(), loadCommunityViewing()]);
 }
 
 async function withRefresh(task, feedbackNode) {
@@ -1104,7 +1258,7 @@ async function handleCreateTenant(event) {
     state.tenantId = Number(payload.tenant.id);
     state.filter = 'all';
     state.sort = 'new';
-    await Promise.all([loadTenantData(), loadRemoteViewing(), loadParallelRemoteViewing()]);
+    await Promise.all([loadTenantData(), loadRemoteViewing(), loadParallelRemoteViewing(), loadCommunityViewing()]);
     renderAll();
   } catch (error) {
     setFeedback(nodes.tenantFeedback, error.message, 'error');
@@ -1259,6 +1413,89 @@ async function handleParallelPreloadedFrontload() {
       result.failedCount > 0 ? 'error' : 'success'
     );
   }, nodes.rvParallelFeedback);
+}
+
+async function handleCommunityRoundCreate(event) {
+  event.preventDefault();
+  if (!nodes.rvCommunityCreateForm || !requireSession(nodes.rvCommunityCreateFeedback)) {
+    return;
+  }
+
+  if (!state.tenantId) {
+    setFeedback(nodes.rvCommunityCreateFeedback, 'Select a tenant before creating a community round.', 'error');
+    return;
+  }
+
+  const title = String(nodes.rvCommunityTitle?.value || '').trim();
+  const briefing = String(nodes.rvCommunityBriefingInput?.value || '').trim();
+  const revealHours = Number(nodes.rvCommunityRevealHours?.value || 24);
+  const imageFile = nodes.rvCommunityImageInput?.files?.[0] || null;
+
+  if (title.length < 3) {
+    setFeedback(nodes.rvCommunityCreateFeedback, 'Title must be at least 3 characters.', 'error');
+    return;
+  }
+  if (!Number.isFinite(revealHours) || revealHours < 0 || revealHours > 168) {
+    setFeedback(nodes.rvCommunityCreateFeedback, 'Reveal hours must be between 0 and 168.', 'error');
+    return;
+  }
+  if (!imageFile) {
+    setFeedback(nodes.rvCommunityCreateFeedback, 'Select an image file to upload.', 'error');
+    return;
+  }
+  if (imageFile.size > 8 * 1024 * 1024) {
+    setFeedback(nodes.rvCommunityCreateFeedback, 'Image must be 8MB or smaller.', 'error');
+    return;
+  }
+
+  await withRefresh(async () => {
+    const imageDataUrl = await fileToDataUrl(imageFile);
+    const result = await apiRequest(`/api/tenants/${state.tenantId}/community-viewing/rounds`, {
+      method: 'POST',
+      body: { title, briefing, revealHours, imageDataUrl }
+    });
+    nodes.rvCommunityCreateForm.reset();
+    if (nodes.rvCommunityRevealHours) {
+      nodes.rvCommunityRevealHours.value = '24';
+    }
+    setFeedback(
+      nodes.rvCommunityCreateFeedback,
+      `Community round "${result.round?.title || title}" created.`,
+      'success'
+    );
+  }, nodes.rvCommunityCreateFeedback);
+}
+
+async function handleCommunityPredictionSubmit(event) {
+  event.preventDefault();
+  if (!nodes.rvCommunityPrediction || !requireSession(nodes.rvCommunityPredictionFeedback)) {
+    return;
+  }
+
+  if (!state.tenantId) {
+    setFeedback(nodes.rvCommunityPredictionFeedback, 'Select a tenant first.', 'error');
+    return;
+  }
+
+  const activeRoundId = Number(state.communityViewing?.active?.id || 0);
+  if (!activeRoundId) {
+    setFeedback(nodes.rvCommunityPredictionFeedback, 'No active community round is available.', 'error');
+    return;
+  }
+
+  const prediction = String(nodes.rvCommunityPrediction.value || '').trim();
+  if (prediction.length < 8) {
+    setFeedback(nodes.rvCommunityPredictionFeedback, 'Prediction must be at least 8 characters.', 'error');
+    return;
+  }
+
+  await withRefresh(async () => {
+    await apiRequest(`/api/tenants/${state.tenantId}/community-viewing/rounds/${activeRoundId}/predictions`, {
+      method: 'POST',
+      body: { prediction }
+    });
+    setFeedback(nodes.rvCommunityPredictionFeedback, 'Community prediction submitted.', 'success');
+  }, nodes.rvCommunityPredictionFeedback);
 }
 
 async function handleFeedClick(event) {
@@ -1483,6 +1720,18 @@ function setupEvents() {
   if (nodes.rvParallelFrontloadBtn) {
     nodes.rvParallelFrontloadBtn.addEventListener('click', () => {
       void handleParallelPreloadedFrontload();
+    });
+  }
+
+  if (nodes.rvCommunityCreateForm) {
+    nodes.rvCommunityCreateForm.addEventListener('submit', (event) => {
+      void handleCommunityRoundCreate(event);
+    });
+  }
+
+  if (nodes.rvCommunityPredictionForm) {
+    nodes.rvCommunityPredictionForm.addEventListener('submit', (event) => {
+      void handleCommunityPredictionSubmit(event);
     });
   }
 

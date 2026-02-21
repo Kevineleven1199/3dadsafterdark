@@ -998,6 +998,41 @@ textarea {
   min-height: 96px;
 }
 
+.rv-community {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 0.7rem;
+}
+
+.rv-community-grid .rv-card {
+  background: rgba(18, 24, 42, 0.88);
+}
+
+#rv-community-prediction {
+  min-height: 100px;
+}
+
+.rv-community-revealed {
+  background: rgba(18, 24, 42, 0.9);
+}
+
+.rv-community-predictions {
+  margin: 0.65rem 0 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.45rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.rv-community-predictions li {
+  color: #b4bfdf;
+  font-size: 0.8rem;
+  line-height: 1.42;
+}
+
 .post-form {
   margin-top: 0.75rem;
   display: grid;

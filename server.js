@@ -12,6 +12,7 @@ const DATA_DIR = path.isAbsolute(process.env.DATA_DIR || '')
   : path.join(__dirname, process.env.DATA_DIR || 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
 const REMOTE_VIEWING_IMAGE_DIR = path.join(DATA_DIR, 'remote-viewing-images');
+const COMMUNITY_VIEWING_IMAGE_DIR = path.join(DATA_DIR, 'community-viewing-images');
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -58,6 +59,9 @@ const PARALLEL_PRELOAD_DEFAULT_DAYS = clampNumber(Number(process.env.PARALLEL_PR
 
 const PARALLEL_TRACK_DYNAMIC = 'dynamic';
 const PARALLEL_TRACK_PRELOADED = 'preloaded';
+const MAX_COMMUNITY_UPLOAD_BYTES = 8 * 1024 * 1024;
+const DEFAULT_JSON_BODY_BYTES = 1_000_000;
+const COMMUNITY_UPLOAD_JSON_BODY_BYTES = 12 * 1024 * 1024;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -240,7 +244,7 @@ function createEmptySeedData() {
 
   return {
     meta: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       templateDataPurged: true,
       initializedAt: createdAt
     },
@@ -257,7 +261,9 @@ function createEmptySeedData() {
       remotePrediction: 1,
       remoteReserve: 1,
       remoteParallelRound: 1,
-      remoteParallelPrediction: 1
+      remoteParallelPrediction: 1,
+      communityRound: 1,
+      communityPrediction: 1
     },
     users: [],
     sessions: [],
@@ -292,7 +298,9 @@ function createEmptySeedData() {
     remoteViewingPredictions: [],
     remoteViewingReserveItems: [],
     remoteViewingParallelRounds: [],
-    remoteViewingParallelPredictions: []
+    remoteViewingParallelPredictions: [],
+    communityViewingRounds: [],
+    communityViewingPredictions: []
   };
 }
 
@@ -373,6 +381,17 @@ function removeLegacyTemplateData(data) {
   data.cases = (data.cases || []).filter((caseItem) => !templateTenantIds.has(caseItem.tenantId));
   data.tasks = (data.tasks || []).filter((task) => !removedCaseIds.has(task.caseId));
   data.rooms = (data.rooms || []).filter((room) => !templateTenantIds.has(room.tenantId));
+  const removedCommunityRoundIds = new Set(
+    (data.communityViewingRounds || [])
+      .filter((round) => templateTenantIds.has(round.tenantId))
+      .map((round) => round.id)
+  );
+  data.communityViewingRounds = (data.communityViewingRounds || []).filter(
+    (round) => !templateTenantIds.has(round.tenantId)
+  );
+  data.communityViewingPredictions = (data.communityViewingPredictions || []).filter(
+    (prediction) => !templateTenantIds.has(prediction.tenantId) && !removedCommunityRoundIds.has(prediction.roundId)
+  );
 
   const removedLocalUserIds = new Set(
     (data.users || [])
@@ -383,6 +402,16 @@ function removeLegacyTemplateData(data) {
   data.users = (data.users || []).filter((user) => !removedLocalUserIds.has(user.id));
   data.sessions = (data.sessions || []).filter((session) => !removedLocalUserIds.has(session.userId));
   data.memberships = (data.memberships || []).filter((membership) => !removedLocalUserIds.has(membership.userId));
+  data.communityViewingRounds = (data.communityViewingRounds || []).filter(
+    (round) => !removedLocalUserIds.has(round.createdBy)
+  );
+  data.communityViewingPredictions = (data.communityViewingPredictions || []).filter(
+    (prediction) => !removedLocalUserIds.has(prediction.userId)
+  );
+  const keptCommunityRoundIds = new Set((data.communityViewingRounds || []).map((round) => round.id));
+  data.communityViewingPredictions = (data.communityViewingPredictions || []).filter((prediction) =>
+    keptCommunityRoundIds.has(prediction.roundId)
+  );
 
   ensureDefaultTenant(data);
   data.meta.templateDataPurged = true;
@@ -417,6 +446,10 @@ function normalizeStore(raw) {
   data.remoteViewingParallelPredictions = Array.isArray(data.remoteViewingParallelPredictions)
     ? data.remoteViewingParallelPredictions
     : [];
+  data.communityViewingRounds = Array.isArray(data.communityViewingRounds) ? data.communityViewingRounds : [];
+  data.communityViewingPredictions = Array.isArray(data.communityViewingPredictions)
+    ? data.communityViewingPredictions
+    : [];
 
   removeLegacyTemplateData(data);
   ensureDefaultTenant(data);
@@ -434,20 +467,23 @@ function normalizeStore(raw) {
     remotePrediction: maxId(data.remoteViewingPredictions) + 1,
     remoteReserve: maxId(data.remoteViewingReserveItems) + 1,
     remoteParallelRound: maxId(data.remoteViewingParallelRounds) + 1,
-    remoteParallelPrediction: maxId(data.remoteViewingParallelPredictions) + 1
+    remoteParallelPrediction: maxId(data.remoteViewingParallelPredictions) + 1,
+    communityRound: maxId(data.communityViewingRounds) + 1,
+    communityPrediction: maxId(data.communityViewingPredictions) + 1
   };
 
   Object.keys(nextIds).forEach((key) => {
     data.nextIds[key] = Math.max(Number(data.nextIds[key] || 1), nextIds[key]);
   });
 
-  data.meta.schemaVersion = 2;
+  data.meta.schemaVersion = 3;
   return data;
 }
 
 function ensureDataStore() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.mkdirSync(REMOTE_VIEWING_IMAGE_DIR, { recursive: true });
+  fs.mkdirSync(COMMUNITY_VIEWING_IMAGE_DIR, { recursive: true });
 
   if (!fs.existsSync(DATA_FILE)) {
     const seed = createEmptySeedData();
@@ -493,13 +529,14 @@ function sendError(res, statusCode, message) {
   sendJson(res, statusCode, { error: message });
 }
 
-function parseJsonBody(req) {
+function parseJsonBody(req, maxBytes = DEFAULT_JSON_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let raw = '';
+    const maxBodySize = clampNumber(Number(maxBytes) || DEFAULT_JSON_BODY_BYTES, 1_000, 20 * 1024 * 1024);
 
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 1_000_000) {
+      if (raw.length > maxBodySize) {
         reject(new Error('Payload too large'));
       }
     });
@@ -2339,9 +2376,40 @@ function getRoundImageFile(round) {
     return null;
   }
 
-  const filename = path.basename(round.imageFilename);
-  const absolutePath = path.join(REMOTE_VIEWING_IMAGE_DIR, filename);
-  if (!absolutePath.startsWith(REMOTE_VIEWING_IMAGE_DIR)) {
+  return getStoredImageFile(round.imageFilename, REMOTE_VIEWING_IMAGE_DIR, round.imageFormat);
+}
+
+function detectImageContentType(extOrMime) {
+  const normalized = String(extOrMime || '')
+    .trim()
+    .toLowerCase();
+
+  if (normalized === 'image/jpeg' || normalized === '.jpeg' || normalized === '.jpg' || normalized === 'jpg') {
+    return 'image/jpeg';
+  }
+  if (normalized === 'image/png' || normalized === '.png' || normalized === 'png') {
+    return 'image/png';
+  }
+  if (normalized === 'image/webp' || normalized === '.webp' || normalized === 'webp') {
+    return 'image/webp';
+  }
+  if (normalized === 'image/gif' || normalized === '.gif' || normalized === 'gif') {
+    return 'image/gif';
+  }
+  if (normalized === 'image/svg+xml' || normalized === '.svg' || normalized === 'svg') {
+    return 'image/svg+xml; charset=utf-8';
+  }
+  return 'application/octet-stream';
+}
+
+function getStoredImageFile(imageFilename, baseDir, imageFormatOrMime = '') {
+  const filename = path.basename(String(imageFilename || ''));
+  if (!filename) {
+    return null;
+  }
+
+  const absolutePath = path.join(baseDir, filename);
+  if (!absolutePath.startsWith(baseDir)) {
     return null;
   }
 
@@ -2349,15 +2417,120 @@ function getRoundImageFile(round) {
     return null;
   }
 
-  const ext = path.extname(absolutePath).toLowerCase();
-  let contentType = 'application/octet-stream';
-  if (ext === '.png') {
-    contentType = 'image/png';
-  } else if (ext === '.svg') {
-    contentType = 'image/svg+xml; charset=utf-8';
+  const stats = fs.statSync(absolutePath);
+  if (!stats.isFile()) {
+    return null;
   }
 
+  const ext = path.extname(absolutePath).toLowerCase();
+  const contentType = detectImageContentType(imageFormatOrMime || ext);
+
   return { absolutePath, contentType };
+}
+
+function parseCommunityImageDataUrl(dataUrl) {
+  const raw = String(dataUrl || '').trim();
+  const match = raw.match(/^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/);
+  if (!match) {
+    throw new Error('Image must be a PNG, JPG, WEBP, or GIF data URL');
+  }
+
+  const mimeType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+  const base64Payload = match[2].replace(/\s+/g, '');
+  const buffer = Buffer.from(base64Payload, 'base64');
+  if (!buffer.length) {
+    throw new Error('Uploaded image is empty');
+  }
+
+  if (buffer.length > MAX_COMMUNITY_UPLOAD_BYTES) {
+    throw new Error('Uploaded image exceeds 8MB limit');
+  }
+
+  let extension = 'png';
+  if (mimeType === 'image/jpeg') {
+    extension = 'jpg';
+  } else if (mimeType === 'image/webp') {
+    extension = 'webp';
+  } else if (mimeType === 'image/gif') {
+    extension = 'gif';
+  }
+
+  return { buffer, mimeType, extension };
+}
+
+function getCommunityRoundById(roundId) {
+  return store.communityViewingRounds.find((round) => round.id === roundId) || null;
+}
+
+function communityRoundIsRevealed(round, atMs = Date.now()) {
+  return new Date(round.revealAt).getTime() <= atMs;
+}
+
+function serializeCommunityPrediction(prediction) {
+  const user = store.users.find((entry) => entry.id === prediction.userId);
+  return {
+    id: prediction.id,
+    userId: prediction.userId,
+    userName: user ? user.name : `User ${prediction.userId}`,
+    prediction: prediction.prediction,
+    createdAt: prediction.createdAt,
+    updatedAt: prediction.updatedAt || null
+  };
+}
+
+function serializeCommunityRound(round, userId = null, includeImage = false) {
+  if (!round) {
+    return null;
+  }
+
+  const revealed = communityRoundIsRevealed(round);
+  const createdByUser = store.users.find((entry) => entry.id === round.createdBy);
+  const myPrediction =
+    userId === null
+      ? null
+      : store.communityViewingPredictions.find(
+          (prediction) => prediction.roundId === round.id && prediction.userId === userId
+        ) || null;
+
+  const predictions = revealed
+    ? store.communityViewingPredictions
+        .filter((prediction) => prediction.roundId === round.id)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .map((prediction) => serializeCommunityPrediction(prediction))
+    : [];
+
+  return {
+    id: round.id,
+    tenantId: round.tenantId,
+    title: round.title,
+    briefing: round.briefing || '',
+    revealAt: round.revealAt,
+    createdAt: round.createdAt,
+    status: revealed ? 'revealed' : 'hidden',
+    submissionOpen: !revealed,
+    submissionCount: store.communityViewingPredictions.filter((prediction) => prediction.roundId === round.id).length,
+    createdBy: createdByUser
+      ? { id: createdByUser.id, name: createdByUser.name, email: createdByUser.email }
+      : { id: round.createdBy, name: 'Unknown', email: '' },
+    myPrediction: myPrediction ? serializeCommunityPrediction(myPrediction) : null,
+    imageUrl: includeImage && revealed ? `/api/community-viewing/rounds/${round.id}/image` : null,
+    predictions
+  };
+}
+
+function buildCommunityViewingPayload(tenantId, userId = null) {
+  const rounds = store.communityViewingRounds
+    .filter((round) => round.tenantId === tenantId)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const active = rounds.find((round) => !communityRoundIsRevealed(round)) || null;
+  const revealed = rounds.find((round) => communityRoundIsRevealed(round)) || null;
+
+  return {
+    active: serializeCommunityRound(active, userId, false),
+    revealed: serializeCommunityRound(revealed, userId, true),
+    queue: rounds.slice(0, 8).map((round) => serializeCommunityRound(round, userId, false))
+  };
 }
 
 function ensureRoundForPredictionSubmission() {
@@ -2687,6 +2860,144 @@ async function handleApi(req, res, pathname, searchParams) {
     return;
   }
 
+  const tenantCommunityMatch = pathname.match(/^\/api\/tenants\/(\d+)\/community-viewing$/);
+  if (req.method === 'GET' && tenantCommunityMatch) {
+    const tenantId = Number(tenantCommunityMatch[1]);
+    const tenant = store.tenants.find((item) => item.id === tenantId);
+    if (!tenant) {
+      sendError(res, 404, 'Tenant not found');
+      return;
+    }
+
+    const auth = getAuthContext(req);
+    const payload = buildCommunityViewingPayload(tenantId, auth.user?.id || null);
+    sendJson(res, 200, payload);
+    return;
+  }
+
+  const tenantCommunityRoundsMatch = pathname.match(/^\/api\/tenants\/(\d+)\/community-viewing\/rounds$/);
+  if (req.method === 'POST' && tenantCommunityRoundsMatch) {
+    const auth = requireAuth(req, res);
+    if (!auth) {
+      return;
+    }
+
+    const tenantId = Number(tenantCommunityRoundsMatch[1]);
+    const tenant = store.tenants.find((item) => item.id === tenantId);
+    if (!tenant) {
+      sendError(res, 404, 'Tenant not found');
+      return;
+    }
+
+    const body = await parseJsonBody(req, COMMUNITY_UPLOAD_JSON_BODY_BYTES);
+    const title = safeTrim(body.title, 140);
+    const briefing = safeTrim(body.briefing, 900);
+    const revealHoursRaw = Number(body.revealHours);
+    const revealHours = Number.isFinite(revealHoursRaw) ? clampNumber(revealHoursRaw, 0, 168) : 24;
+    const imageDataUrl = body.imageDataUrl;
+
+    if (title.length < 3) {
+      sendError(res, 400, 'Title must be at least 3 characters');
+      return;
+    }
+
+    if (!imageDataUrl) {
+      sendError(res, 400, 'Image upload is required');
+      return;
+    }
+
+    let parsedImage;
+    try {
+      parsedImage = parseCommunityImageDataUrl(imageDataUrl);
+    } catch (error) {
+      sendError(res, 400, normalizeErrorMessage(error, 'Invalid image upload'));
+      return;
+    }
+
+    ensureMembership(auth.user.id, tenantId);
+
+    const roundId = nextId('communityRound');
+    const imageFilename = `community-round-${tenantId}-${roundId}-${Date.now()}.${parsedImage.extension}`;
+    const imagePath = path.join(COMMUNITY_VIEWING_IMAGE_DIR, imageFilename);
+    fs.writeFileSync(imagePath, parsedImage.buffer);
+
+    const round = {
+      id: roundId,
+      tenantId,
+      createdBy: auth.user.id,
+      title,
+      briefing,
+      imageFilename,
+      imageFormat: parsedImage.extension,
+      imageMimeType: parsedImage.mimeType,
+      revealAt: new Date(Date.now() + revealHours * 60 * 60 * 1000).toISOString(),
+      createdAt: nowIso()
+    };
+
+    store.communityViewingRounds.push(round);
+    persistStore();
+
+    sendJson(res, 201, { round: serializeCommunityRound(round, auth.user.id, false) });
+    return;
+  }
+
+  const tenantCommunityPredictionMatch = pathname.match(
+    /^\/api\/tenants\/(\d+)\/community-viewing\/rounds\/(\d+)\/predictions$/
+  );
+  if (req.method === 'POST' && tenantCommunityPredictionMatch) {
+    const auth = requireAuth(req, res);
+    if (!auth) {
+      return;
+    }
+
+    const tenantId = Number(tenantCommunityPredictionMatch[1]);
+    const roundId = Number(tenantCommunityPredictionMatch[2]);
+    const round = getCommunityRoundById(roundId);
+    if (!round || round.tenantId !== tenantId) {
+      sendError(res, 404, 'Community round not found');
+      return;
+    }
+
+    if (communityRoundIsRevealed(round)) {
+      sendError(res, 400, 'Predictions are closed for this community round');
+      return;
+    }
+
+    const body = await parseJsonBody(req);
+    const predictionText = safeTrim(body.prediction, 1200);
+    if (predictionText.length < 8) {
+      sendError(res, 400, 'Prediction must be at least 8 characters long');
+      return;
+    }
+
+    ensureMembership(auth.user.id, tenantId);
+
+    const existing = store.communityViewingPredictions.find(
+      (prediction) => prediction.roundId === round.id && prediction.userId === auth.user.id
+    );
+    if (existing) {
+      existing.prediction = predictionText;
+      existing.updatedAt = nowIso();
+      persistStore();
+      sendJson(res, 200, { prediction: serializeCommunityPrediction(existing) });
+      return;
+    }
+
+    const prediction = {
+      id: nextId('communityPrediction'),
+      roundId: round.id,
+      tenantId,
+      userId: auth.user.id,
+      prediction: predictionText,
+      createdAt: nowIso(),
+      updatedAt: null
+    };
+    store.communityViewingPredictions.push(prediction);
+    persistStore();
+    sendJson(res, 201, { prediction: serializeCommunityPrediction(prediction) });
+    return;
+  }
+
   if (req.method === 'POST' && pathname === '/api/remote-viewing/frontload') {
     const auth = requireAuth(req, res);
     if (!auth) {
@@ -2924,6 +3235,7 @@ async function handleApi(req, res, pathname, searchParams) {
 
   const roundImageMatch = pathname.match(/^\/api\/remote-viewing\/rounds\/(\d+)\/image$/);
   const parallelRoundImageMatch = pathname.match(/^\/api\/remote-viewing\/parallel\/rounds\/(\d+)\/image$/);
+  const communityRoundImageMatch = pathname.match(/^\/api\/community-viewing\/rounds\/(\d+)\/image$/);
   if (req.method === 'GET' && parallelRoundImageMatch) {
     const roundId = Number(parallelRoundImageMatch[1]);
     const round = getParallelRoundById(roundId);
@@ -2972,6 +3284,44 @@ async function handleApi(req, res, pathname, searchParams) {
     }
 
     const imageFile = getRoundImageFile(round);
+    if (!imageFile) {
+      sendError(res, 404, 'Image file not found');
+      return;
+    }
+
+    fs.readFile(imageFile.absolutePath, (error, data) => {
+      if (error) {
+        sendError(res, 500, 'Unable to read image file');
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': imageFile.contentType,
+        'Cache-Control': 'no-store'
+      });
+      res.end(data);
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && communityRoundImageMatch) {
+    const roundId = Number(communityRoundImageMatch[1]);
+    const round = getCommunityRoundById(roundId);
+    if (!round) {
+      sendError(res, 404, 'Community viewing round not found');
+      return;
+    }
+
+    if (!communityRoundIsRevealed(round)) {
+      sendError(res, 403, 'Image is locked until reveal time');
+      return;
+    }
+
+    const imageFile = getStoredImageFile(
+      round.imageFilename,
+      COMMUNITY_VIEWING_IMAGE_DIR,
+      round.imageMimeType || round.imageFormat
+    );
     if (!imageFile) {
       sendError(res, 404, 'Image file not found');
       return;

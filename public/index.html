@@ -326,6 +326,98 @@
               <p id="rv-parallel-comparison"></p>
             </article>
           </section>
+
+          <section class="rv-community">
+            <div class="section-head compact">
+              <p class="kicker">Community Target Lab</p>
+              <h3>Upload A Photo. Crowdsource The Guesses.</h3>
+            </div>
+            <p id="rv-community-note" class="rv-engine-note">
+              Any logged-in member can start a photo round for the current tenant. Guesses stay open until reveal.
+            </p>
+
+            <div class="rv-grid rv-community-grid">
+              <article class="rv-card">
+                <h3>Create Community Round</h3>
+                <form id="rv-community-create-form" class="stack-form compact" novalidate>
+                  <label>
+                    Round Title
+                    <input
+                      id="rv-community-title"
+                      name="title"
+                      type="text"
+                      maxlength="140"
+                      placeholder="What should viewers focus on?"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Briefing (optional)
+                    <textarea
+                      id="rv-community-briefing-input"
+                      name="briefing"
+                      rows="3"
+                      maxlength="900"
+                      placeholder="Optional context for viewers without giving away details."
+                    ></textarea>
+                  </label>
+                  <label>
+                    Reveal In Hours
+                    <input
+                      id="rv-community-reveal-hours"
+                      name="revealHours"
+                      type="number"
+                      min="0"
+                      max="168"
+                      value="24"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Upload Photo
+                    <input
+                      id="rv-community-image-input"
+                      name="image"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      required
+                    />
+                  </label>
+                  <button type="submit" class="btn btn-outline">Start Community Round</button>
+                </form>
+                <p id="rv-community-create-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+              </article>
+
+              <article class="rv-card">
+                <h3>Current Community Round</h3>
+                <p id="rv-community-active-meta" class="rv-meta"></p>
+                <form id="rv-community-prediction-form" class="stack-form compact" novalidate>
+                  <label>
+                    Your Guess
+                    <textarea
+                      id="rv-community-prediction"
+                      name="prediction"
+                      rows="4"
+                      placeholder="Describe what you believe is in the hidden photo."
+                      required
+                    ></textarea>
+                  </label>
+                  <button type="submit" class="btn btn-primary">Submit Community Guess</button>
+                </form>
+                <p id="rv-community-prediction-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+              </article>
+            </div>
+
+            <article class="rv-card rv-community-revealed">
+              <h3>Latest Revealed Community Round</h3>
+              <p id="rv-community-revealed-meta" class="rv-meta"></p>
+              <figure id="rv-community-image-shell" class="rv-image-shell" hidden>
+                <img id="rv-community-image" alt="Latest revealed community target" />
+              </figure>
+              <p id="rv-community-briefing" class="rv-prompt"></p>
+              <ol id="rv-community-predictions-list" class="rv-community-predictions"></ol>
+            </article>
+          </section>
         </section>
 
         <section class="toolbar panel reveal-block">
