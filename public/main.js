@@ -6,6 +6,7 @@ const TYPE_LABELS = {
 };
 
 const STORAGE_TOKEN_KEY = 'signalscope_token';
+const INTRO_STORAGE_KEY = 'signalscope_intro_seen';
 
 const state = {
   token: localStorage.getItem(STORAGE_TOKEN_KEY) || '',
@@ -79,7 +80,10 @@ const nodes = {
   rvParallelFrontloadBtn: document.getElementById('rv-parallel-frontload-btn'),
   rvParallelFeedback: document.getElementById('rv-parallel-feedback'),
   rvParallelComparison: document.getElementById('rv-parallel-comparison'),
-  year: document.getElementById('current-year')
+  year: document.getElementById('current-year'),
+  abductionIntro: document.getElementById('abduction-intro'),
+  introEnterBtn: document.getElementById('intro-enter-btn'),
+  introSkipBtn: document.getElementById('intro-skip-btn')
 };
 
 function escapeHtml(value) {
@@ -122,6 +126,79 @@ function setFeedback(node, message, tone = 'neutral') {
   } else if (tone === 'success') {
     node.classList.add('success');
   }
+}
+
+function setupAbductionIntro() {
+  const intro = nodes.abductionIntro;
+  if (!intro) {
+    return;
+  }
+
+  const quickMode =
+    localStorage.getItem(INTRO_STORAGE_KEY) === '1' ||
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const timers = [];
+  let closed = false;
+
+  const clearTimers = () => {
+    timers.forEach((timer) => {
+      clearTimeout(timer);
+    });
+  };
+
+  const closeIntro = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    clearTimers();
+    document.removeEventListener('keydown', handleKeydown);
+    localStorage.setItem(INTRO_STORAGE_KEY, '1');
+    document.body.classList.remove('intro-lock');
+    intro.classList.add('closing');
+    setTimeout(() => {
+      intro.classList.add('hidden');
+    }, 540);
+  };
+
+  const handleKeydown = (event) => {
+    if (event.key === 'Escape') {
+      closeIntro();
+    }
+  };
+
+  document.body.classList.add('intro-lock');
+  document.addEventListener('keydown', handleKeydown);
+
+  if (nodes.introEnterBtn) {
+    nodes.introEnterBtn.addEventListener('click', closeIntro);
+  }
+
+  if (nodes.introSkipBtn) {
+    nodes.introSkipBtn.addEventListener('click', closeIntro);
+  }
+
+  const schedule = (delay, className) => {
+    const timer = setTimeout(() => {
+      intro.classList.add(className);
+    }, delay);
+    timers.push(timer);
+  };
+
+  if (quickMode) {
+    schedule(120, 'phase-beam');
+    schedule(260, 'phase-abduct');
+    schedule(420, 'phase-portal');
+    schedule(620, 'phase-ready');
+    timers.push(setTimeout(closeIntro, 2100));
+    return;
+  }
+
+  schedule(650, 'phase-beam');
+  schedule(1700, 'phase-abduct');
+  schedule(3050, 'phase-portal');
+  schedule(4550, 'phase-ready');
+  timers.push(setTimeout(closeIntro, 7800));
 }
 
 async function apiRequest(endpoint, options = {}) {
@@ -1441,6 +1518,7 @@ async function init() {
     nodes.year.textContent = String(new Date().getFullYear());
   }
 
+  setupAbductionIntro();
   setupEvents();
   setupRevealAnimation();
 
