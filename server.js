@@ -21,6 +21,30 @@ const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 const OPENAI_TEXT_MODEL = process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini';
 const OPENAI_JUDGE_MODEL = process.env.OPENAI_JUDGE_MODEL || 'gpt-4o-mini';
 
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const ANTHROPIC_BASE_URL = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1').replace(/\/$/, '');
+const ANTHROPIC_TEXT_MODEL = process.env.ANTHROPIC_TEXT_MODEL || 'claude-3-5-sonnet-latest';
+const ANTHROPIC_JUDGE_MODEL = process.env.ANTHROPIC_JUDGE_MODEL || ANTHROPIC_TEXT_MODEL;
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const OPENROUTER_BASE_URL = (process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+const OPENROUTER_TEXT_MODEL = process.env.OPENROUTER_TEXT_MODEL || 'anthropic/claude-3.5-sonnet';
+const OPENROUTER_JUDGE_MODEL = process.env.OPENROUTER_JUDGE_MODEL || OPENROUTER_TEXT_MODEL;
+const OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || 'openai/gpt-image-1';
+const OPENROUTER_APP_NAME = process.env.OPENROUTER_APP_NAME || 'SignalScope';
+const OPENROUTER_APP_URL = process.env.OPENROUTER_APP_URL || 'https://signalscope.local';
+
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+
+const X_API_BASE_URL = (process.env.X_API_BASE_URL || 'https://api.x.com').replace(/\/$/, '');
+const X_API_KEY = process.env.X_API_KEY || '';
+const X_API_KEY_SECRET = process.env.X_API_KEY_SECRET || '';
+const X_ACCESS_TOKEN = process.env.X_ACCESS_TOKEN || '';
+const X_ACCESS_TOKEN_SECRET = process.env.X_ACCESS_TOKEN_SECRET || '';
+const X_AUTOPOST_ENABLED = String(process.env.X_AUTOPOST_ENABLED || '').toLowerCase() === 'true';
+const X_AUTOPOST_INTERVAL_MS = Math.max(60_000, Number(process.env.X_AUTOPOST_INTERVAL_MS || 15 * 60 * 1000));
+const PROVIDER_TIMEOUT_MS = Math.max(5_000, Number(process.env.PROVIDER_TIMEOUT_MS || 30_000));
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -125,12 +149,70 @@ function clampNumber(value, min, max) {
 }
 
 function isRemoteViewingReady() {
-  return Boolean(OPENAI_API_KEY);
+  return availablePromptProviders().length > 0 && availableImageProviders().length > 0;
+}
+
+function hasXCredentials() {
+  return Boolean(X_API_KEY && X_API_KEY_SECRET && X_ACCESS_TOKEN && X_ACCESS_TOKEN_SECRET);
+}
+
+function availablePromptProviders() {
+  const providers = [];
+  if (ANTHROPIC_API_KEY) {
+    providers.push('anthropic');
+  }
+  if (OPENROUTER_API_KEY) {
+    providers.push('openrouter');
+  }
+  if (OPENAI_API_KEY) {
+    providers.push('openai');
+  }
+  return providers;
+}
+
+function availableImageProviders() {
+  const providers = [];
+  if (OPENROUTER_API_KEY) {
+    providers.push('openrouter');
+  }
+  if (OPENAI_API_KEY) {
+    providers.push('openai');
+  }
+  return providers;
+}
+
+function buildFailoverOrder() {
+  return {
+    prompt: availablePromptProviders(),
+    image: availableImageProviders(),
+    judge: availablePromptProviders()
+  };
 }
 
 function normalizeErrorMessage(error, fallback) {
   const message = safeTrim(error && error.message ? error.message : '', 420);
   return message || fallback;
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = PROVIDER_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function createEmptySeedData() {
@@ -740,7 +822,7 @@ async function callOpenAi(endpoint, payload) {
     throw new Error('OPENAI_API_KEY is required for remote viewing engines');
   }
 
-  const response = await fetch(`${OPENAI_BASE_URL}${endpoint}`, {
+  const response = await fetchWithTimeout(`${OPENAI_BASE_URL}${endpoint}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -767,6 +849,134 @@ async function callOpenAi(endpoint, payload) {
   return parsed;
 }
 
+async function callAnthropicMessages(payload) {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is not configured');
+  }
+
+  const response = await fetchWithTimeout(`${ANTHROPIC_BASE_URL}/messages`, {
+    method: 'POST',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await response.text();
+  let parsed = {};
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      parsed = {};
+    }
+  }
+
+  if (!response.ok) {
+    const message = parsed?.error?.message || parsed?.error?.type || raw;
+    throw new Error(`Anthropic API error: ${message || `status ${response.status}`}`);
+  }
+
+  const contentItem = Array.isArray(parsed.content)
+    ? parsed.content.find((item) => item && item.type === 'text')
+    : null;
+  const content = contentItem?.text || '';
+  if (!content.trim()) {
+    throw new Error('Anthropic returned empty text content');
+  }
+
+  return { raw: parsed, content };
+}
+
+async function callOpenRouterChat(payload) {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error('OPENROUTER_API_KEY is not configured');
+  }
+
+  const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': OPENROUTER_APP_URL,
+      'X-Title': OPENROUTER_APP_NAME
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await response.text();
+  let parsed = {};
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      parsed = {};
+    }
+  }
+
+  if (!response.ok) {
+    const message = parsed?.error?.message || raw;
+    throw new Error(`OpenRouter API error: ${message || `status ${response.status}`}`);
+  }
+
+  const content = parsed?.choices?.[0]?.message?.content;
+  if (!content || !String(content).trim()) {
+    throw new Error('OpenRouter returned empty chat content');
+  }
+
+  return { raw: parsed, content: String(content) };
+}
+
+async function callOpenRouterImage(payload) {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error('OPENROUTER_API_KEY is not configured');
+  }
+
+  const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/images/generations`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': OPENROUTER_APP_URL,
+      'X-Title': OPENROUTER_APP_NAME
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await response.text();
+  let parsed = {};
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      parsed = {};
+    }
+  }
+
+  if (!response.ok) {
+    const message = parsed?.error?.message || raw;
+    throw new Error(`OpenRouter image API error: ${message || `status ${response.status}`}`);
+  }
+
+  return parsed;
+}
+
+async function withProviderFailover(calls, failurePrefix) {
+  const failures = [];
+
+  for (const call of calls) {
+    try {
+      return await call.run();
+    } catch (error) {
+      failures.push(`${call.provider}: ${normalizeErrorMessage(error, 'unknown error')}`);
+    }
+  }
+
+  throw new Error(`${failurePrefix}. ${failures.join(' | ')}`);
+}
+
 function extractJsonObject(content) {
   const trimmed = String(content || '').trim();
   if (!trimmed) {
@@ -785,26 +995,162 @@ function extractJsonObject(content) {
   }
 }
 
-async function generateRemoteViewingTarget(roundDate) {
-  const entropy = crypto.randomBytes(8).toString('hex');
-  const payload = await callOpenAi('/chat/completions', {
-    model: OPENAI_TEXT_MODEL,
-    temperature: 1,
-    response_format: { type: 'json_object' },
-    messages: [
+function extractSvgMarkup(content) {
+  const text = String(content || '').trim();
+  const start = text.indexOf('<svg');
+  const end = text.lastIndexOf('</svg>');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('Model did not return valid SVG markup');
+  }
+
+  let svg = text.slice(start, end + 6).trim();
+  svg = svg.replace(/<script[\s\S]*?<\/script>/gi, '');
+
+  if (!svg.includes('xmlns=')) {
+    svg = svg.replace('<svg', '<svg xmlns=\"http://www.w3.org/2000/svg\"');
+  }
+
+  return svg;
+}
+
+async function generateRemoteViewingSvg(prompt) {
+  const systemInstruction =
+    'Generate an original SVG image scene based on the user prompt. Return SVG markup only, no prose, no code fences. Use viewBox 0 0 1024 1024. Use layered shapes, gradients, and clear objects matching the scene.';
+  const userInstruction = `Create an SVG for this remote-viewing target prompt: ${prompt}`;
+
+  const { content, provider, model } = await withProviderFailover(
+    [
       {
-        role: 'system',
-        content:
-          'You design remote-viewing targets. Return JSON only with keys: title, prompt. Title should be short. Prompt should describe a vivid, specific scene with clear objects, location, action, and atmosphere.'
+        provider: 'anthropic',
+        run: async () => {
+          const result = await callAnthropicMessages({
+            model: ANTHROPIC_TEXT_MODEL,
+            max_tokens: 2000,
+            temperature: 0.8,
+            system: systemInstruction,
+            messages: [{ role: 'user', content: userInstruction }]
+          });
+          return { content: result.content, provider: 'anthropic', model: ANTHROPIC_TEXT_MODEL };
+        }
       },
       {
-        role: 'user',
-        content: `Create a unique remote-viewing target for UTC day ${roundDate}. Use entropy token ${entropy}. Keep prompt under 360 characters.`
+        provider: 'openrouter',
+        run: async () => {
+          const result = await callOpenRouterChat({
+            model: OPENROUTER_TEXT_MODEL,
+            temperature: 0.8,
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: userInstruction }
+            ]
+          });
+          return { content: result.content, provider: 'openrouter', model: OPENROUTER_TEXT_MODEL };
+        }
+      },
+      {
+        provider: 'openai',
+        run: async () => {
+          const payload = await callOpenAi('/chat/completions', {
+            model: OPENAI_TEXT_MODEL,
+            temperature: 0.8,
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: userInstruction }
+            ]
+          });
+          return {
+            content: payload?.choices?.[0]?.message?.content || '',
+            provider: 'openai',
+            model: OPENAI_TEXT_MODEL
+          };
+        }
       }
-    ]
-  });
+    ].filter((entry) => {
+      if (entry.provider === 'anthropic') {
+        return Boolean(ANTHROPIC_API_KEY);
+      }
+      if (entry.provider === 'openrouter') {
+        return Boolean(OPENROUTER_API_KEY);
+      }
+      return Boolean(OPENAI_API_KEY);
+    }),
+    'SVG fallback generation failed across all providers'
+  );
 
-  const content = payload?.choices?.[0]?.message?.content;
+  return {
+    svg: extractSvgMarkup(content),
+    provider,
+    model
+  };
+}
+
+async function generateRemoteViewingTarget(roundDate) {
+  const entropy = crypto.randomBytes(8).toString('hex');
+  const systemInstruction =
+    'You design remote-viewing targets. Return JSON only with keys: title, prompt. Title should be short. Prompt should describe a vivid, specific scene with clear objects, location, action, and atmosphere.';
+  const userInstruction = `Create a unique remote-viewing target for UTC day ${roundDate}. Use entropy token ${entropy}. Keep prompt under 360 characters.`;
+
+  const { content, provider, model } = await withProviderFailover(
+    [
+      {
+        provider: 'anthropic',
+        run: async () => {
+          const result = await callAnthropicMessages({
+            model: ANTHROPIC_TEXT_MODEL,
+            max_tokens: 500,
+            temperature: 1,
+            system: systemInstruction,
+            messages: [{ role: 'user', content: userInstruction }]
+          });
+          return { content: result.content, provider: 'anthropic', model: ANTHROPIC_TEXT_MODEL };
+        }
+      },
+      {
+        provider: 'openrouter',
+        run: async () => {
+          const result = await callOpenRouterChat({
+            model: OPENROUTER_TEXT_MODEL,
+            temperature: 1,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: userInstruction }
+            ]
+          });
+          return { content: result.content, provider: 'openrouter', model: OPENROUTER_TEXT_MODEL };
+        }
+      },
+      {
+        provider: 'openai',
+        run: async () => {
+          const payload = await callOpenAi('/chat/completions', {
+            model: OPENAI_TEXT_MODEL,
+            temperature: 1,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: userInstruction }
+            ]
+          });
+          return {
+            content: payload?.choices?.[0]?.message?.content || '',
+            provider: 'openai',
+            model: OPENAI_TEXT_MODEL
+          };
+        }
+      }
+    ].filter((entry) => {
+      if (entry.provider === 'anthropic') {
+        return Boolean(ANTHROPIC_API_KEY);
+      }
+      if (entry.provider === 'openrouter') {
+        return Boolean(OPENROUTER_API_KEY);
+      }
+      return Boolean(OPENAI_API_KEY);
+    }),
+    'Remote-viewing prompt generation failed across all providers'
+  );
+
   const parsed = extractJsonObject(content);
 
   const title = safeTrim(parsed.title, 120);
@@ -814,11 +1160,11 @@ async function generateRemoteViewingTarget(roundDate) {
     throw new Error('Prompt generator did not return valid title/prompt');
   }
 
-  return { title, prompt };
+  return { title, prompt, provider, model };
 }
 
 async function downloadImageBuffer(url) {
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url, { method: 'GET' });
   if (!response.ok) {
     throw new Error(`Failed to download generated image (${response.status})`);
   }
@@ -827,66 +1173,156 @@ async function downloadImageBuffer(url) {
 }
 
 async function generateRemoteViewingImageFile(roundDate, roundId, prompt) {
-  const payload = await callOpenAi('/images/generations', {
-    model: OPENAI_IMAGE_MODEL,
-    prompt,
-    size: '1024x1024'
-  });
+  try {
+    const imageResult = await withProviderFailover(
+      [
+        {
+          provider: 'openrouter',
+          run: async () => {
+            const payload = await callOpenRouterImage({
+              model: OPENROUTER_IMAGE_MODEL,
+              prompt,
+              size: '1024x1024'
+            });
+            return { payload, provider: 'openrouter', model: OPENROUTER_IMAGE_MODEL };
+          }
+        },
+        {
+          provider: 'openai',
+          run: async () => {
+            const payload = await callOpenAi('/images/generations', {
+              model: OPENAI_IMAGE_MODEL,
+              prompt,
+              size: '1024x1024'
+            });
+            return { payload, provider: 'openai', model: OPENAI_IMAGE_MODEL };
+          }
+        }
+      ].filter((entry) =>
+        entry.provider === 'openrouter' ? Boolean(OPENROUTER_API_KEY) : Boolean(OPENAI_API_KEY)
+      ),
+      'Remote-viewing image generation failed across all providers'
+    );
 
-  const item = payload?.data?.[0];
-  if (!item) {
-    throw new Error('Image generator returned no image data');
+    const item = imageResult.payload?.data?.[0];
+    if (!item) {
+      throw new Error('Image generator returned no image data');
+    }
+
+    let buffer = null;
+    if (item.b64_json) {
+      buffer = Buffer.from(item.b64_json, 'base64');
+    } else if (item.url) {
+      buffer = await downloadImageBuffer(item.url);
+    }
+
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Generated image buffer was empty');
+    }
+
+    fs.mkdirSync(REMOTE_VIEWING_IMAGE_DIR, { recursive: true });
+    const filename = `${roundDate}-${roundId}.png`;
+    const absolutePath = path.join(REMOTE_VIEWING_IMAGE_DIR, filename);
+    fs.writeFileSync(absolutePath, buffer);
+
+    return {
+      filename,
+      revisedPrompt: safeTrim(item.revised_prompt || '', 500),
+      provider: imageResult.provider,
+      model: imageResult.model,
+      format: 'png'
+    };
+  } catch (imageError) {
+    const svgFallback = await generateRemoteViewingSvg(prompt);
+    fs.mkdirSync(REMOTE_VIEWING_IMAGE_DIR, { recursive: true });
+    const filename = `${roundDate}-${roundId}.svg`;
+    const absolutePath = path.join(REMOTE_VIEWING_IMAGE_DIR, filename);
+    fs.writeFileSync(absolutePath, svgFallback.svg, 'utf8');
+
+    return {
+      filename,
+      revisedPrompt: '',
+      provider: svgFallback.provider,
+      model: svgFallback.model,
+      format: 'svg',
+      fallbackFrom: normalizeErrorMessage(imageError, 'image provider failure')
+    };
   }
-
-  let buffer = null;
-  if (item.b64_json) {
-    buffer = Buffer.from(item.b64_json, 'base64');
-  } else if (item.url) {
-    buffer = await downloadImageBuffer(item.url);
-  }
-
-  if (!buffer || buffer.length === 0) {
-    throw new Error('Generated image buffer was empty');
-  }
-
-  fs.mkdirSync(REMOTE_VIEWING_IMAGE_DIR, { recursive: true });
-  const filename = `${roundDate}-${roundId}.png`;
-  const absolutePath = path.join(REMOTE_VIEWING_IMAGE_DIR, filename);
-  fs.writeFileSync(absolutePath, buffer);
-
-  return {
-    filename,
-    revisedPrompt: safeTrim(item.revised_prompt || '', 500)
-  };
 }
 
 async function judgePredictionWithAi(predictionText, round) {
-  const payload = await callOpenAi('/chat/completions', {
-    model: OPENAI_JUDGE_MODEL,
-    temperature: 0,
-    response_format: { type: 'json_object' },
-    messages: [
+  const systemInstruction =
+    'You score remote-viewing guesses. Return JSON only with keys: outcome, score, rationale. outcome must be win or loss. score must be integer 0-100. A win means meaningful overlap with target scene objects/location/action.';
+  const userInstruction = `Target title: ${round.targetTitle}\nTarget prompt: ${round.targetPrompt}\nUser prediction: ${predictionText}\nReturn strict JSON.`;
+
+  const { content, provider, model } = await withProviderFailover(
+    [
       {
-        role: 'system',
-        content:
-          'You score remote-viewing guesses. Return JSON only with keys: outcome, score, rationale. outcome must be win or loss. score must be integer 0-100. A win means meaningful overlap with target scene objects/location/action.'
+        provider: 'anthropic',
+        run: async () => {
+          const result = await callAnthropicMessages({
+            model: ANTHROPIC_JUDGE_MODEL,
+            max_tokens: 500,
+            temperature: 0,
+            system: systemInstruction,
+            messages: [{ role: 'user', content: userInstruction }]
+          });
+          return { content: result.content, provider: 'anthropic', model: ANTHROPIC_JUDGE_MODEL };
+        }
       },
       {
-        role: 'user',
-        content:
-          `Target title: ${round.targetTitle}\nTarget prompt: ${round.targetPrompt}\nUser prediction: ${predictionText}\nReturn strict JSON.`
+        provider: 'openrouter',
+        run: async () => {
+          const result = await callOpenRouterChat({
+            model: OPENROUTER_JUDGE_MODEL,
+            temperature: 0,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: userInstruction }
+            ]
+          });
+          return { content: result.content, provider: 'openrouter', model: OPENROUTER_JUDGE_MODEL };
+        }
+      },
+      {
+        provider: 'openai',
+        run: async () => {
+          const payload = await callOpenAi('/chat/completions', {
+            model: OPENAI_JUDGE_MODEL,
+            temperature: 0,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: userInstruction }
+            ]
+          });
+          return {
+            content: payload?.choices?.[0]?.message?.content || '',
+            provider: 'openai',
+            model: OPENAI_JUDGE_MODEL
+          };
+        }
       }
-    ]
-  });
+    ].filter((entry) => {
+      if (entry.provider === 'anthropic') {
+        return Boolean(ANTHROPIC_API_KEY);
+      }
+      if (entry.provider === 'openrouter') {
+        return Boolean(OPENROUTER_API_KEY);
+      }
+      return Boolean(OPENAI_API_KEY);
+    }),
+    'Remote-viewing judge failed across all providers'
+  );
 
-  const content = payload?.choices?.[0]?.message?.content;
   const parsed = extractJsonObject(content);
 
   const outcome = String(parsed.outcome || '').toLowerCase() === 'win' ? 'win' : 'loss';
   const score = clampNumber(Number(parsed.score) || (outcome === 'win' ? 72 : 28), 0, 100);
   const rationale = safeTrim(parsed.rationale || 'No rationale provided.', 300);
 
-  return { outcome, score, rationale };
+  return { outcome, score, rationale, provider, model };
 }
 
 function isRoundRevealed(round, atMs = Date.now()) {
@@ -912,7 +1348,9 @@ async function ensureRemoteViewingRound(roundDate) {
 
   const lockPromise = (async () => {
     if (!isRemoteViewingReady()) {
-      throw new Error('OPENAI_API_KEY is not configured. Remote viewing generation is unavailable.');
+      throw new Error(
+        'No usable remote-viewing engine providers are configured. Add ANTHROPIC_API_KEY and/or OPENROUTER_API_KEY (or OPENAI_API_KEY).'
+      );
     }
 
     let round = getRoundByDate(roundDate);
@@ -926,9 +1364,9 @@ async function ensureRemoteViewingRound(roundDate) {
         imageFilename: '',
         generatedAt: '',
         revealAt: revealAtForRoundDate(roundDate),
-        imageModel: OPENAI_IMAGE_MODEL,
-        promptModel: OPENAI_TEXT_MODEL,
-        judgeModel: OPENAI_JUDGE_MODEL,
+        imageModel: '',
+        promptModel: '',
+        judgeModel: '',
         status: 'generating',
         createdAt: nowIso()
       };
@@ -944,11 +1382,15 @@ async function ensureRemoteViewingRound(roundDate) {
       round.targetPrompt = target.prompt;
       round.revisedPrompt = image.revisedPrompt;
       round.imageFilename = image.filename;
+      round.imageFormat = image.format || 'png';
+      round.imageFallbackNote = image.fallbackFrom || '';
       round.generatedAt = nowIso();
       round.revealAt = revealAtForRoundDate(roundDate);
-      round.imageModel = OPENAI_IMAGE_MODEL;
-      round.promptModel = OPENAI_TEXT_MODEL;
-      round.judgeModel = OPENAI_JUDGE_MODEL;
+      round.imageModel = image.model;
+      round.promptModel = target.model;
+      round.judgeModel = round.judgeModel || '';
+      round.promptProvider = target.provider;
+      round.imageProvider = image.provider;
       round.status = 'hidden';
 
       persistStore();
@@ -1072,6 +1514,10 @@ async function scorePendingRemotePredictions() {
           prediction.score = judged.score;
           prediction.rationale = judged.rationale;
           prediction.scoredAt = nowIso();
+          prediction.judgeProvider = judged.provider;
+          prediction.judgeModel = judged.model;
+          round.judgeProvider = judged.provider;
+          round.judgeModel = judged.model;
           delete prediction.judgeError;
           changed = true;
         } catch (error) {
@@ -1124,7 +1570,15 @@ function serializeRoundForDaily(round, userId = null, includeTarget = false) {
     status: revealed ? 'revealed' : 'hidden',
     submissionOpen: !revealed,
     generatedAt: round.generatedAt || null,
-    imageModel: round.imageModel || OPENAI_IMAGE_MODEL,
+    promptProvider: round.promptProvider || null,
+    imageProvider: round.imageProvider || null,
+    judgeProvider: round.judgeProvider || null,
+    promptModel: round.promptModel || null,
+    imageModel: round.imageModel || null,
+    judgeModel: round.judgeModel || null,
+    imageFormat: round.imageFormat || null,
+    imageFallbackNote: round.imageFallbackNote || null,
+    xPost: round.xPost || null,
     myPrediction: myPrediction ? serializePrediction(myPrediction) : null,
     imageUrl: includeTarget && revealed ? `/api/remote-viewing/rounds/${round.id}/image` : null,
     targetTitle: includeTarget && revealed ? round.targetTitle : null,
@@ -1133,10 +1587,11 @@ function serializeRoundForDaily(round, userId = null, includeTarget = false) {
 }
 
 async function buildRemoteViewingDailyPayload(userId = null) {
+  const failoverOrder = buildFailoverOrder();
   let engineReady = isRemoteViewingReady();
   let engineMessage = engineReady
     ? 'Remote viewing engines online.'
-    : 'OPENAI_API_KEY is missing. Daily target generation is unavailable.';
+    : 'No usable provider chain. Configure ANTHROPIC_API_KEY and OPENROUTER_API_KEY (or OPENAI_API_KEY).';
 
   let todayRound = getRoundByDate(dateKeyUtc());
 
@@ -1147,7 +1602,7 @@ async function buildRemoteViewingDailyPayload(userId = null) {
       engineReady = false;
       engineMessage = normalizeErrorMessage(
         error,
-        'OpenAI generation failed. Check quota, billing, and model access.'
+        'Generation failed. Check provider quotas, billing, and model access.'
       );
     }
   }
@@ -1159,7 +1614,7 @@ async function buildRemoteViewingDailyPayload(userId = null) {
       engineReady = false;
       engineMessage = normalizeErrorMessage(
         error,
-        'OpenAI scoring failed. Check quota, billing, and model access.'
+        'Scoring failed. Check provider quotas, billing, and model access.'
       );
     }
   }
@@ -1168,12 +1623,27 @@ async function buildRemoteViewingDailyPayload(userId = null) {
 
   return {
     engine: {
-      provider: 'openai',
+      provider: failoverOrder.prompt[0] || null,
       ready: engineReady,
-      imageModel: OPENAI_IMAGE_MODEL,
-      promptModel: OPENAI_TEXT_MODEL,
-      judgeModel: OPENAI_JUDGE_MODEL,
-      message: engineMessage
+      failoverOrder,
+      configured: {
+        anthropic: Boolean(ANTHROPIC_API_KEY),
+        openrouter: Boolean(OPENROUTER_API_KEY),
+        openai: Boolean(OPENAI_API_KEY)
+      },
+      defaults: {
+        anthropicTextModel: ANTHROPIC_TEXT_MODEL,
+        anthropicJudgeModel: ANTHROPIC_JUDGE_MODEL,
+        openrouterTextModel: OPENROUTER_TEXT_MODEL,
+        openrouterJudgeModel: OPENROUTER_JUDGE_MODEL,
+        openrouterImageModel: OPENROUTER_IMAGE_MODEL,
+        openaiTextModel: OPENAI_TEXT_MODEL,
+        openaiJudgeModel: OPENAI_JUDGE_MODEL,
+        openaiImageModel: OPENAI_IMAGE_MODEL
+      },
+      message: engineMessage,
+      xAutoPostEnabled: X_AUTOPOST_ENABLED,
+      xCredentialsReady: hasXCredentials()
     },
     today: serializeRoundForDaily(todayRound, userId, false),
     revealed: serializeRoundForDaily(revealedRound, userId, true),
@@ -1197,12 +1667,222 @@ function getRoundImageFile(round) {
     return null;
   }
 
-  return absolutePath;
+  const ext = path.extname(absolutePath).toLowerCase();
+  let contentType = 'application/octet-stream';
+  if (ext === '.png') {
+    contentType = 'image/png';
+  } else if (ext === '.svg') {
+    contentType = 'image/svg+xml; charset=utf-8';
+  }
+
+  return { absolutePath, contentType };
 }
 
 function ensureRoundForPredictionSubmission() {
   const today = dateKeyUtc();
   return ensureRemoteViewingRound(today);
+}
+
+function fixedEncode(input) {
+  return encodeURIComponent(input)
+    .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function buildOAuth1Header(method, requestUrl) {
+  const oauthParams = {
+    oauth_consumer_key: X_API_KEY,
+    oauth_nonce: crypto.randomBytes(16).toString('hex'),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: String(Math.floor(Date.now() / 1000)),
+    oauth_token: X_ACCESS_TOKEN,
+    oauth_version: '1.0'
+  };
+
+  const url = new URL(requestUrl);
+  const normalizedUrl = `${url.protocol}//${url.host}${url.pathname}`;
+
+  const allParams = [];
+  Object.keys(oauthParams).forEach((key) => {
+    allParams.push([fixedEncode(key), fixedEncode(oauthParams[key])]);
+  });
+  url.searchParams.forEach((value, key) => {
+    allParams.push([fixedEncode(key), fixedEncode(value)]);
+  });
+
+  allParams.sort((a, b) => {
+    if (a[0] === b[0]) {
+      return a[1].localeCompare(b[1]);
+    }
+    return a[0].localeCompare(b[0]);
+  });
+
+  const parameterString = allParams.map(([k, v]) => `${k}=${v}`).join('&');
+  const signatureBase = [
+    method.toUpperCase(),
+    fixedEncode(normalizedUrl),
+    fixedEncode(parameterString)
+  ].join('&');
+
+  const signingKey = `${fixedEncode(X_API_KEY_SECRET)}&${fixedEncode(X_ACCESS_TOKEN_SECRET)}`;
+  const signature = crypto.createHmac('sha1', signingKey).update(signatureBase).digest('base64');
+  oauthParams.oauth_signature = signature;
+
+  const header = `OAuth ${Object.entries(oauthParams)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, value]) => `${fixedEncode(key)}=\"${fixedEncode(value)}\"`)
+    .join(', ')}`;
+
+  return header;
+}
+
+async function postToX(text) {
+  if (!hasXCredentials()) {
+    throw new Error('X credentials are missing. Set X_API_KEY, X_API_KEY_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET.');
+  }
+
+  const endpoint = `${X_API_BASE_URL}/2/tweets`;
+  const authHeader = buildOAuth1Header('POST', endpoint);
+  const response = await fetchWithTimeout(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: authHeader,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ text })
+  });
+
+  const raw = await response.text();
+  let parsed = {};
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_error) {
+      parsed = {};
+    }
+  }
+
+  if (!response.ok) {
+    const errorMessage = parsed?.title || parsed?.detail || raw || `status ${response.status}`;
+    throw new Error(`X API error: ${errorMessage}`);
+  }
+
+  const tweetId = parsed?.data?.id;
+  if (!tweetId) {
+    throw new Error('X API response did not include tweet id');
+  }
+
+  return {
+    id: tweetId,
+    url: `https://x.com/i/web/status/${tweetId}`
+  };
+}
+
+function composeRoundPostText(round) {
+  const imageLink = PUBLIC_BASE_URL
+    ? `${PUBLIC_BASE_URL}/api/remote-viewing/rounds/${round.id}/image`
+    : `/api/remote-viewing/rounds/${round.id}/image`;
+  const title = safeTrim(round.targetTitle || 'Remote Viewing Target', 120);
+
+  const lines = [
+    `Remote Viewing Reveal ${round.roundDate}`,
+    `${title}`,
+    `Target image: ${imageLink}`,
+    '#RemoteViewing #SignalScope'
+  ];
+
+  return safeTrim(lines.join('\n'), 280);
+}
+
+function listRevealedRoundsWithoutXPost() {
+  const nowMs = Date.now();
+  return store.remoteViewingRounds
+    .filter((round) => round.imageFilename && round.targetPrompt && isRoundRevealed(round, nowMs) && !round.xPost?.id)
+    .sort((a, b) => new Date(a.roundDate).getTime() - new Date(b.roundDate).getTime());
+}
+
+async function maybeAutoPostRevealedRoundsToX() {
+  if (!X_AUTOPOST_ENABLED || !hasXCredentials()) {
+    return;
+  }
+
+  const pending = listRevealedRoundsWithoutXPost();
+  if (pending.length === 0) {
+    return;
+  }
+
+  for (const round of pending) {
+    try {
+      const postResult = await postToX(composeRoundPostText(round));
+      round.xPost = {
+        id: postResult.id,
+        url: postResult.url,
+        postedAt: nowIso()
+      };
+      persistStore();
+    } catch (error) {
+      round.xPost = {
+        id: '',
+        url: '',
+        postedAt: '',
+        error: normalizeErrorMessage(error, 'X posting failed'),
+        lastAttemptAt: nowIso()
+      };
+      persistStore();
+      break;
+    }
+  }
+}
+
+async function frontloadRemoteViewingRounds(days, startDate) {
+  if (!isRemoteViewingReady()) {
+    throw new Error(
+      'No usable provider chain. Configure ANTHROPIC_API_KEY and OPENROUTER_API_KEY (or OPENAI_API_KEY).'
+    );
+  }
+
+  const start = startDate ? parseRoundDate(startDate) : parseRoundDate(dateKeyUtc());
+  const totalDays = clampNumber(Number(days) || 30, 1, 120);
+  const generated = [];
+  const existing = [];
+  const failed = [];
+
+  for (let offset = 0; offset < totalDays; offset += 1) {
+    const targetDate = new Date(start.getTime());
+    targetDate.setUTCDate(start.getUTCDate() + offset);
+    const roundDate = dateKeyUtc(targetDate);
+
+    try {
+      const round = getRoundByDate(roundDate);
+      if (round && round.imageFilename && round.targetPrompt) {
+        existing.push(roundDate);
+        continue;
+      }
+
+      const ensured = await ensureRemoteViewingRound(roundDate);
+      generated.push({
+        roundDate,
+        roundId: ensured.id,
+        promptProvider: ensured.promptProvider || null,
+        imageProvider: ensured.imageProvider || null
+      });
+    } catch (error) {
+      failed.push({
+        roundDate,
+        error: normalizeErrorMessage(error, 'Unknown generation error')
+      });
+    }
+  }
+
+  return {
+    requestedDays: totalDays,
+    startDate: dateKeyUtc(start),
+    generatedCount: generated.length,
+    existingCount: existing.length,
+    failedCount: failed.length,
+    generated,
+    existing,
+    failed
+  };
 }
 
 async function handleApi(req, res, pathname, searchParams) {
@@ -1310,7 +1990,32 @@ async function handleApi(req, res, pathname, searchParams) {
   if (req.method === 'GET' && pathname === '/api/remote-viewing/daily') {
     const auth = getAuthContext(req);
     const payload = await buildRemoteViewingDailyPayload(auth.user?.id || null);
+    await maybeAutoPostRevealedRoundsToX();
     sendJson(res, 200, payload);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/remote-viewing/frontload') {
+    const auth = requireAuth(req, res);
+    if (!auth) {
+      return;
+    }
+
+    const body = await parseJsonBody(req);
+    const days = clampNumber(Number(body.days) || 30, 1, 120);
+    const startDate = body.startDate ? safeTrim(body.startDate, 10) : '';
+    if (startDate) {
+      try {
+        parseRoundDate(startDate);
+      } catch (_error) {
+        sendError(res, 400, 'Invalid startDate format. Use YYYY-MM-DD.');
+        return;
+      }
+    }
+
+    const result = await frontloadRemoteViewingRounds(days, startDate || dateKeyUtc());
+    await maybeAutoPostRevealedRoundsToX();
+    sendJson(res, 200, result);
     return;
   }
 
@@ -1321,7 +2026,11 @@ async function handleApi(req, res, pathname, searchParams) {
     }
 
     if (!isRemoteViewingReady()) {
-      sendError(res, 503, 'OPENAI_API_KEY is not configured. Remote viewing is unavailable.');
+      sendError(
+        res,
+        503,
+        'No usable provider chain. Configure ANTHROPIC_API_KEY and OPENROUTER_API_KEY (or OPENAI_API_KEY).'
+      );
       return;
     }
 
@@ -1410,24 +2119,64 @@ async function handleApi(req, res, pathname, searchParams) {
       return;
     }
 
-    const imagePath = getRoundImageFile(round);
-    if (!imagePath) {
+    const imageFile = getRoundImageFile(round);
+    if (!imageFile) {
       sendError(res, 404, 'Image file not found');
       return;
     }
 
-    fs.readFile(imagePath, (error, data) => {
+    fs.readFile(imageFile.absolutePath, (error, data) => {
       if (error) {
         sendError(res, 500, 'Unable to read image file');
         return;
       }
 
       res.writeHead(200, {
-        'Content-Type': 'image/png',
+        'Content-Type': imageFile.contentType,
         'Cache-Control': 'no-store'
       });
       res.end(data);
     });
+    return;
+  }
+
+  const roundXPostMatch = pathname.match(/^\/api\/remote-viewing\/rounds\/(\d+)\/x-post$/);
+  if (req.method === 'POST' && roundXPostMatch) {
+    const auth = requireAuth(req, res);
+    if (!auth) {
+      return;
+    }
+
+    if (!hasXCredentials()) {
+      sendError(
+        res,
+        503,
+        'X credentials are missing. Set X_API_KEY, X_API_KEY_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET.'
+      );
+      return;
+    }
+
+    const roundId = Number(roundXPostMatch[1]);
+    const round = store.remoteViewingRounds.find((item) => item.id === roundId);
+    if (!round) {
+      sendError(res, 404, 'Remote viewing round not found');
+      return;
+    }
+
+    if (!isRoundRevealed(round)) {
+      sendError(res, 400, 'Round is not revealed yet');
+      return;
+    }
+
+    const postResult = await postToX(composeRoundPostText(round));
+    round.xPost = {
+      id: postResult.id,
+      url: postResult.url,
+      postedAt: nowIso()
+    };
+    persistStore();
+
+    sendJson(res, 200, { xPost: round.xPost });
     return;
   }
 
@@ -1803,7 +2552,42 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+let xAutoPostTimer = null;
+
+function startXAutoPostLoop() {
+  if (!X_AUTOPOST_ENABLED) {
+    return;
+  }
+
+  const run = async () => {
+    try {
+      await maybeAutoPostRevealedRoundsToX();
+    } catch (error) {
+      console.error('X auto-post loop error:', error);
+    }
+  };
+
+  void run();
+  xAutoPostTimer = setInterval(() => {
+    void run();
+  }, X_AUTOPOST_INTERVAL_MS);
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`SignalScope platform running on ${HOST}:${PORT}`);
-  console.log(`Remote viewing engine: ${isRemoteViewingReady() ? 'OPENAI READY' : 'OPENAI_API_KEY missing'}`);
+  const order = buildFailoverOrder();
+  console.log(
+    `Remote viewing failover prompt chain: ${
+      order.prompt.length ? order.prompt.join(' -> ') : 'none configured'
+    }`
+  );
+  console.log(
+    `Remote viewing failover image chain: ${order.image.length ? order.image.join(' -> ') : 'none configured'}`
+  );
+  console.log(
+    `X auto-post: ${X_AUTOPOST_ENABLED ? 'enabled' : 'disabled'} | credentials: ${
+      hasXCredentials() ? 'present' : 'missing'
+    }`
+  );
+  startXAutoPostLoop();
 });

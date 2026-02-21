@@ -59,6 +59,9 @@ const nodes = {
   rvOutcome: document.getElementById('rv-outcome'),
   rvRecord: document.getElementById('rv-record'),
   rvLeaderboard: document.getElementById('rv-leaderboard'),
+  rvFrontloadBtn: document.getElementById('rv-frontload-btn'),
+  rvXPostBtn: document.getElementById('rv-x-post-btn'),
+  rvAdminFeedback: document.getElementById('rv-admin-feedback'),
   year: document.getElementById('current-year')
 };
 
@@ -436,7 +439,8 @@ function renderRemoteViewing() {
   const today = payload.today;
   const revealed = payload.revealed;
 
-  nodes.rvEngineNote.textContent = engine.message || '';
+  const order = Array.isArray(engine.failoverOrder?.prompt) ? engine.failoverOrder.prompt.join(' -> ') : 'none';
+  nodes.rvEngineNote.textContent = `${engine.message || ''} Prompt chain: ${order}.`;
 
   if (today) {
     nodes.rvTodayMeta.textContent = `Round ${today.roundDate}. Locked until ${formatTimestamp(today.revealAt)}.`;
@@ -515,6 +519,13 @@ function renderRemoteViewing() {
 
   const record = payload.record || { wins: 0, losses: 0, total: 0, winRate: '0%' };
   nodes.rvRecord.textContent = `${record.wins}W ${record.losses}L (${record.winRate}) across ${record.total} scored rounds.`;
+
+  if (nodes.rvFrontloadBtn) {
+    nodes.rvFrontloadBtn.disabled = !Boolean(state.user && engine.ready);
+  }
+  if (nodes.rvXPostBtn) {
+    nodes.rvXPostBtn.disabled = !Boolean(state.user && revealed && revealed.status === 'revealed');
+  }
 
   const leaderboard = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
   if (leaderboard.length === 0) {
@@ -848,6 +859,49 @@ async function handleRemotePredictionSubmit(event) {
   }, nodes.rvFeedback);
 }
 
+async function handleRemoteFrontload() {
+  if (!requireSession(nodes.rvAdminFeedback)) {
+    return;
+  }
+
+  await withRefresh(async () => {
+    const result = await apiRequest('/api/remote-viewing/frontload', {
+      method: 'POST',
+      body: { days: 30 }
+    });
+
+    setFeedback(
+      nodes.rvAdminFeedback,
+      `Frontload complete: ${result.generatedCount} generated, ${result.existingCount} existing, ${result.failedCount} failed.`,
+      result.failedCount > 0 ? 'error' : 'success'
+    );
+  }, nodes.rvAdminFeedback);
+}
+
+async function handleRemoteXPost() {
+  if (!requireSession(nodes.rvAdminFeedback)) {
+    return;
+  }
+
+  const revealedId = Number(state.remoteViewing?.revealed?.id || 0);
+  if (!revealedId) {
+    setFeedback(nodes.rvAdminFeedback, 'No revealed round is available to post.', 'error');
+    return;
+  }
+
+  await withRefresh(async () => {
+    const result = await apiRequest(`/api/remote-viewing/rounds/${revealedId}/x-post`, {
+      method: 'POST'
+    });
+
+    setFeedback(
+      nodes.rvAdminFeedback,
+      `Posted to X: ${result.xPost?.url || 'posted'}`,
+      'success'
+    );
+  }, nodes.rvAdminFeedback);
+}
+
 async function handleFeedClick(event) {
   const upvoteTrigger = event.target.closest('button[data-action="upvote"]');
   if (!upvoteTrigger) {
@@ -1009,6 +1063,18 @@ function setupEvents() {
   if (nodes.rvForm) {
     nodes.rvForm.addEventListener('submit', (event) => {
       void handleRemotePredictionSubmit(event);
+    });
+  }
+
+  if (nodes.rvFrontloadBtn) {
+    nodes.rvFrontloadBtn.addEventListener('click', () => {
+      void handleRemoteFrontload();
+    });
+  }
+
+  if (nodes.rvXPostBtn) {
+    nodes.rvXPostBtn.addEventListener('click', () => {
+      void handleRemoteXPost();
     });
   }
 
