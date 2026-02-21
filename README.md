@@ -25,6 +25,8 @@ Targets are generated on the day, hidden until the next day, then scored for win
   - AI win/loss scoring with failover chain: `Anthropic -> OpenRouter -> OpenAI`
   - Personal record + leaderboard
   - Frontload endpoint for a month (or custom span) of rounds
+  - Reserve image pool endpoint to pre-generate emergency backup targets
+  - Automatic reserve takeover if live daily image generation fails
   - Optional X auto-posting for revealed rounds
 
 ## No Template Mock Data
@@ -111,5 +113,7 @@ ANTHROPIC_API_KEY=... OPENROUTER_API_KEY=... HOST=127.0.0.1 PORT=3001 DATA_DIR=/
 - `GET /api/remote-viewing/daily`
 - `POST /api/remote-viewing/predictions`
 - `POST /api/remote-viewing/frontload`
+- `POST /api/remote-viewing/reserve/frontload`
+  - Body: `{ "targetAvailable": 30 }` (tops up unused reserve images to target)
 - `GET /api/remote-viewing/rounds/:id/image`
 - `POST /api/remote-viewing/rounds/:id/x-post`

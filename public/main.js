@@ -60,6 +60,7 @@ const nodes = {
   rvRecord: document.getElementById('rv-record'),
   rvLeaderboard: document.getElementById('rv-leaderboard'),
   rvFrontloadBtn: document.getElementById('rv-frontload-btn'),
+  rvReserveFrontloadBtn: document.getElementById('rv-reserve-frontload-btn'),
   rvXPostBtn: document.getElementById('rv-x-post-btn'),
   rvAdminFeedback: document.getElementById('rv-admin-feedback'),
   year: document.getElementById('current-year')
@@ -438,16 +439,26 @@ function renderRemoteViewing() {
   const engine = payload.engine || { ready: false, message: 'Remote viewing engine unavailable.' };
   const today = payload.today;
   const revealed = payload.revealed;
+  const reserve = engine.reserve || {};
 
-  const order = Array.isArray(engine.failoverOrder?.prompt) ? engine.failoverOrder.prompt.join(' -> ') : 'none';
-  nodes.rvEngineNote.textContent = `${engine.message || ''} Prompt chain: ${order}.`;
+  const promptOrder = Array.isArray(engine.failoverOrder?.prompt)
+    ? engine.failoverOrder.prompt.join(' -> ')
+    : 'none';
+  const imageOrder = Array.isArray(engine.failoverOrder?.image)
+    ? engine.failoverOrder.image.join(' -> ')
+    : 'none';
+  const reserveAvailable = Number.isFinite(Number(reserve.available)) ? Number(reserve.available) : 0;
+  const reserveTotal = Number.isFinite(Number(reserve.total)) ? Number(reserve.total) : 0;
+  nodes.rvEngineNote.textContent = `${
+    engine.message || ''
+  } Prompt chain: ${promptOrder}. Image chain: ${imageOrder}. Reserve: ${reserveAvailable}/${reserveTotal} ready.`;
 
   if (today) {
     nodes.rvTodayMeta.textContent = `Round ${today.roundDate}. Locked until ${formatTimestamp(today.revealAt)}.`;
   } else if (engine.ready) {
     nodes.rvTodayMeta.textContent = 'Today\'s round is initializing.';
   } else {
-    nodes.rvTodayMeta.textContent = 'Today\'s round unavailable until OpenAI key is configured.';
+    nodes.rvTodayMeta.textContent = 'Today\'s round unavailable until provider chain is healthy.';
   }
 
   const canSubmit = Boolean(state.user && engine.ready && today && today.submissionOpen);
@@ -522,6 +533,9 @@ function renderRemoteViewing() {
 
   if (nodes.rvFrontloadBtn) {
     nodes.rvFrontloadBtn.disabled = !Boolean(state.user && engine.ready);
+  }
+  if (nodes.rvReserveFrontloadBtn) {
+    nodes.rvReserveFrontloadBtn.disabled = !Boolean(state.user && engine.ready);
   }
   if (nodes.rvXPostBtn) {
     nodes.rvXPostBtn.disabled = !Boolean(state.user && revealed && revealed.status === 'revealed');
@@ -872,7 +886,26 @@ async function handleRemoteFrontload() {
 
     setFeedback(
       nodes.rvAdminFeedback,
-      `Frontload complete: ${result.generatedCount} generated, ${result.existingCount} existing, ${result.failedCount} failed.`,
+      `Frontload complete: ${result.generatedCount} generated, ${result.existingCount} existing, ${result.failedCount} failed, ${result.reserveTakeoverCount || 0} reserve takeovers.`,
+      result.failedCount > 0 ? 'error' : 'success'
+    );
+  }, nodes.rvAdminFeedback);
+}
+
+async function handleRemoteReserveFrontload() {
+  if (!requireSession(nodes.rvAdminFeedback)) {
+    return;
+  }
+
+  await withRefresh(async () => {
+    const result = await apiRequest('/api/remote-viewing/reserve/frontload', {
+      method: 'POST',
+      body: { targetAvailable: 30 }
+    });
+
+    setFeedback(
+      nodes.rvAdminFeedback,
+      `Reserve top-up: ${result.generatedCount} generated, ${result.availableAfterCount} available now, ${result.failedCount} failed.`,
       result.failedCount > 0 ? 'error' : 'success'
     );
   }, nodes.rvAdminFeedback);
@@ -1069,6 +1102,12 @@ function setupEvents() {
   if (nodes.rvFrontloadBtn) {
     nodes.rvFrontloadBtn.addEventListener('click', () => {
       void handleRemoteFrontload();
+    });
+  }
+
+  if (nodes.rvReserveFrontloadBtn) {
+    nodes.rvReserveFrontloadBtn.addEventListener('click', () => {
+      void handleRemoteReserveFrontload();
     });
   }
 

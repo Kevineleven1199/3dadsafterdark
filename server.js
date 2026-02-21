@@ -234,7 +234,8 @@ function createEmptySeedData() {
       task: 1,
       room: 1,
       remoteRound: 1,
-      remotePrediction: 1
+      remotePrediction: 1,
+      remoteReserve: 1
     },
     users: [],
     sessions: [],
@@ -266,7 +267,8 @@ function createEmptySeedData() {
     tasks: [],
     rooms: [],
     remoteViewingRounds: [],
-    remoteViewingPredictions: []
+    remoteViewingPredictions: [],
+    remoteViewingReserveItems: []
   };
 }
 
@@ -382,6 +384,9 @@ function normalizeStore(raw) {
   data.remoteViewingPredictions = Array.isArray(data.remoteViewingPredictions)
     ? data.remoteViewingPredictions
     : [];
+  data.remoteViewingReserveItems = Array.isArray(data.remoteViewingReserveItems)
+    ? data.remoteViewingReserveItems
+    : [];
 
   removeLegacyTemplateData(data);
   ensureDefaultTenant(data);
@@ -396,7 +401,8 @@ function normalizeStore(raw) {
     task: maxId(data.tasks) + 1,
     room: maxId(data.rooms) + 1,
     remoteRound: maxId(data.remoteViewingRounds) + 1,
-    remotePrediction: maxId(data.remoteViewingPredictions) + 1
+    remotePrediction: maxId(data.remoteViewingPredictions) + 1,
+    remoteReserve: maxId(data.remoteViewingReserveItems) + 1
   };
 
   Object.keys(nextIds).forEach((key) => {
@@ -1333,6 +1339,74 @@ function getRoundByDate(roundDate) {
   return store.remoteViewingRounds.find((round) => round.roundDate === roundDate) || null;
 }
 
+function reserveInventorySummary() {
+  const items = Array.isArray(store.remoteViewingReserveItems) ? store.remoteViewingReserveItems : [];
+  const available = items.filter((item) => !item.usedAt && item.imageFilename && item.targetPrompt).length;
+  const used = items.filter((item) => Boolean(item.usedAt)).length;
+
+  return {
+    total: items.length,
+    available,
+    used,
+    recommended: 30
+  };
+}
+
+function applyGeneratedPayloadToRound(round, roundDate, target, image) {
+  round.targetTitle = target.title;
+  round.targetPrompt = target.prompt;
+  round.revisedPrompt = image.revisedPrompt;
+  round.imageFilename = image.filename;
+  round.imageFormat = image.format || 'png';
+  round.imageFallbackNote = image.fallbackFrom || '';
+  round.generatedAt = nowIso();
+  round.revealAt = revealAtForRoundDate(roundDate);
+  round.imageModel = image.model;
+  round.promptModel = target.model;
+  round.judgeModel = round.judgeModel || '';
+  round.promptProvider = target.provider;
+  round.imageProvider = image.provider;
+  round.status = 'hidden';
+  round.generationMode = 'live';
+  round.reserveItemId = null;
+  round.reserveUsedAt = '';
+}
+
+function claimReserveItemForRound(roundDate, sourceError) {
+  const candidate = (store.remoteViewingReserveItems || []).find(
+    (item) => !item.usedAt && item.imageFilename && item.targetPrompt
+  );
+
+  if (!candidate) {
+    return null;
+  }
+
+  candidate.usedAt = nowIso();
+  candidate.usedForRoundDate = roundDate;
+  candidate.useReason = normalizeErrorMessage(sourceError, 'Primary generation failed');
+  return candidate;
+}
+
+function applyReservePayloadToRound(round, roundDate, reserveItem, sourceError) {
+  round.targetTitle = reserveItem.targetTitle;
+  round.targetPrompt = reserveItem.targetPrompt;
+  round.revisedPrompt = reserveItem.revisedPrompt || '';
+  round.imageFilename = reserveItem.imageFilename;
+  round.imageFormat = reserveItem.imageFormat || 'png';
+  round.imageFallbackNote = `Reserve takeover: ${normalizeErrorMessage(sourceError, 'Primary generation failed')}`;
+  round.generatedAt = nowIso();
+  round.revealAt = revealAtForRoundDate(roundDate);
+  round.imageModel = reserveItem.imageModel || '';
+  round.promptModel = reserveItem.promptModel || '';
+  round.judgeModel = round.judgeModel || '';
+  round.promptProvider = reserveItem.promptProvider || null;
+  round.imageProvider = reserveItem.imageProvider || null;
+  round.status = 'hidden';
+  round.generationMode = 'reserve';
+  round.reserveItemId = reserveItem.id;
+  round.reserveUsedAt = reserveItem.usedAt;
+}
+
 const generationLocks = new Map();
 let scoringLock = null;
 
@@ -1347,12 +1421,6 @@ async function ensureRemoteViewingRound(roundDate) {
   }
 
   const lockPromise = (async () => {
-    if (!isRemoteViewingReady()) {
-      throw new Error(
-        'No usable remote-viewing engine providers are configured. Add ANTHROPIC_API_KEY and/or OPENROUTER_API_KEY (or OPENAI_API_KEY).'
-      );
-    }
-
     let round = getRoundByDate(roundDate);
     if (!round) {
       round = {
@@ -1368,34 +1436,49 @@ async function ensureRemoteViewingRound(roundDate) {
         promptModel: '',
         judgeModel: '',
         status: 'generating',
+        generationMode: '',
+        reserveItemId: null,
+        reserveUsedAt: '',
         createdAt: nowIso()
       };
       store.remoteViewingRounds.push(round);
       persistStore();
     }
 
+    if (!isRemoteViewingReady()) {
+      const providerError = new Error(
+        'No usable remote-viewing engine providers are configured. Add ANTHROPIC_API_KEY and/or OPENROUTER_API_KEY (or OPENAI_API_KEY).'
+      );
+      const reserveItem = claimReserveItemForRound(roundDate, providerError);
+      if (reserveItem) {
+        applyReservePayloadToRound(round, roundDate, reserveItem, providerError);
+        persistStore();
+        return round;
+      }
+
+      store.remoteViewingRounds = store.remoteViewingRounds.filter((item) => item.id !== round.id);
+      persistStore();
+      throw new Error(
+        'No usable provider chain and no reserve images are available. Refill reserve pool with /api/remote-viewing/reserve/frontload.'
+      );
+    }
+
     try {
       const target = await generateRemoteViewingTarget(roundDate);
       const image = await generateRemoteViewingImageFile(roundDate, round.id, target.prompt);
 
-      round.targetTitle = target.title;
-      round.targetPrompt = target.prompt;
-      round.revisedPrompt = image.revisedPrompt;
-      round.imageFilename = image.filename;
-      round.imageFormat = image.format || 'png';
-      round.imageFallbackNote = image.fallbackFrom || '';
-      round.generatedAt = nowIso();
-      round.revealAt = revealAtForRoundDate(roundDate);
-      round.imageModel = image.model;
-      round.promptModel = target.model;
-      round.judgeModel = round.judgeModel || '';
-      round.promptProvider = target.provider;
-      round.imageProvider = image.provider;
-      round.status = 'hidden';
+      applyGeneratedPayloadToRound(round, roundDate, target, image);
 
       persistStore();
       return round;
     } catch (error) {
+      const reserveItem = claimReserveItemForRound(roundDate, error);
+      if (reserveItem) {
+        applyReservePayloadToRound(round, roundDate, reserveItem, error);
+        persistStore();
+        return round;
+      }
+
       store.remoteViewingRounds = store.remoteViewingRounds.filter((item) => item.id !== round.id);
       persistStore();
       throw error;
@@ -1409,6 +1492,76 @@ async function ensureRemoteViewingRound(roundDate) {
   } finally {
     generationLocks.delete(roundDate);
   }
+}
+
+async function generateRemoteViewingReserveItem(itemId) {
+  const generationToken = `reserve-${dateKeyUtc()}-${itemId}-${crypto.randomBytes(5).toString('hex')}`;
+  const target = await generateRemoteViewingTarget(generationToken);
+  const image = await generateRemoteViewingImageFile('reserve', `r${itemId}`, target.prompt);
+
+  return {
+    id: itemId,
+    targetTitle: target.title,
+    targetPrompt: target.prompt,
+    revisedPrompt: image.revisedPrompt || '',
+    imageFilename: image.filename,
+    imageFormat: image.format || 'png',
+    promptProvider: target.provider,
+    imageProvider: image.provider,
+    promptModel: target.model,
+    imageModel: image.model,
+    imageFallbackNote: image.fallbackFrom || '',
+    createdAt: nowIso(),
+    usedAt: '',
+    usedForRoundDate: '',
+    useReason: ''
+  };
+}
+
+async function frontloadRemoteViewingReserveItems(targetAvailableCount) {
+  if (!isRemoteViewingReady()) {
+    throw new Error(
+      'No usable provider chain. Configure ANTHROPIC_API_KEY and OPENROUTER_API_KEY (or OPENAI_API_KEY).'
+    );
+  }
+
+  const requestedAvailable = clampNumber(Number(targetAvailableCount) || 30, 1, 120);
+  const before = reserveInventorySummary();
+  const required = Math.max(0, requestedAvailable - before.available);
+  const generated = [];
+  const failed = [];
+
+  for (let index = 0; index < required; index += 1) {
+    const reserveId = nextId('remoteReserve');
+    try {
+      const item = await generateRemoteViewingReserveItem(reserveId);
+      store.remoteViewingReserveItems.push(item);
+      generated.push({
+        id: item.id,
+        promptProvider: item.promptProvider || null,
+        imageProvider: item.imageProvider || null,
+        imageFormat: item.imageFormat || null
+      });
+      persistStore();
+    } catch (error) {
+      failed.push({
+        reserveId,
+        error: normalizeErrorMessage(error, 'Reserve image generation failed')
+      });
+      persistStore();
+    }
+  }
+
+  const after = reserveInventorySummary();
+  return {
+    requestedAvailable,
+    generatedCount: generated.length,
+    existingAvailableCount: before.available,
+    failedCount: failed.length,
+    availableAfterCount: after.available,
+    generated,
+    failed
+  };
 }
 
 function serializePrediction(prediction) {
@@ -1578,6 +1731,9 @@ function serializeRoundForDaily(round, userId = null, includeTarget = false) {
     judgeModel: round.judgeModel || null,
     imageFormat: round.imageFormat || null,
     imageFallbackNote: round.imageFallbackNote || null,
+    generationMode: round.generationMode || 'live',
+    reserveItemId: Number.isFinite(Number(round.reserveItemId)) ? Number(round.reserveItemId) : null,
+    reserveUsedAt: round.reserveUsedAt || null,
     xPost: round.xPost || null,
     myPrediction: myPrediction ? serializePrediction(myPrediction) : null,
     imageUrl: includeTarget && revealed ? `/api/remote-viewing/rounds/${round.id}/image` : null,
@@ -1588,18 +1744,22 @@ function serializeRoundForDaily(round, userId = null, includeTarget = false) {
 
 async function buildRemoteViewingDailyPayload(userId = null) {
   const failoverOrder = buildFailoverOrder();
-  let engineReady = isRemoteViewingReady();
-  let engineMessage = engineReady
+  const providerReady = isRemoteViewingReady();
+  const reserveBefore = reserveInventorySummary();
+  let engineReady = providerReady || reserveBefore.available > 0;
+  let engineMessage = providerReady
     ? 'Remote viewing engines online.'
-    : 'No usable provider chain. Configure ANTHROPIC_API_KEY and OPENROUTER_API_KEY (or OPENAI_API_KEY).';
+    : reserveBefore.available > 0
+      ? 'Provider chain degraded; reserve backup is online.'
+      : 'No usable provider chain. Configure ANTHROPIC_API_KEY and OPENROUTER_API_KEY (or OPENAI_API_KEY).';
 
   let todayRound = getRoundByDate(dateKeyUtc());
 
-  if (!todayRound && engineReady) {
+  if (!todayRound && (providerReady || reserveBefore.available > 0)) {
     try {
       todayRound = await ensureRemoteViewingRound(dateKeyUtc());
     } catch (error) {
-      engineReady = false;
+      engineReady = reserveInventorySummary().available > 0;
       engineMessage = normalizeErrorMessage(
         error,
         'Generation failed. Check provider quotas, billing, and model access.'
@@ -1607,7 +1767,7 @@ async function buildRemoteViewingDailyPayload(userId = null) {
     }
   }
 
-  if (engineReady) {
+  if (providerReady) {
     try {
       await scorePendingRemotePredictions();
     } catch (error) {
@@ -1620,6 +1780,11 @@ async function buildRemoteViewingDailyPayload(userId = null) {
   }
 
   const revealedRound = getLatestRevealedRound();
+  const reserveTakeoverInEffect = todayRound && todayRound.generationMode === 'reserve';
+  if (reserveTakeoverInEffect) {
+    engineMessage = `Primary generation failed, reserve image used for ${todayRound.roundDate}. ${engineMessage}`;
+  }
+  const reserve = reserveInventorySummary();
 
   return {
     engine: {
@@ -1641,6 +1806,7 @@ async function buildRemoteViewingDailyPayload(userId = null) {
         openaiJudgeModel: OPENAI_JUDGE_MODEL,
         openaiImageModel: OPENAI_IMAGE_MODEL
       },
+      reserve,
       message: engineMessage,
       xAutoPostEnabled: X_AUTOPOST_ENABLED,
       xCredentialsReady: hasXCredentials()
@@ -1863,7 +2029,9 @@ async function frontloadRemoteViewingRounds(days, startDate) {
         roundDate,
         roundId: ensured.id,
         promptProvider: ensured.promptProvider || null,
-        imageProvider: ensured.imageProvider || null
+        imageProvider: ensured.imageProvider || null,
+        generationMode: ensured.generationMode || 'live',
+        reserveItemId: Number.isFinite(Number(ensured.reserveItemId)) ? Number(ensured.reserveItemId) : null
       });
     } catch (error) {
       failed.push({
@@ -1879,6 +2047,7 @@ async function frontloadRemoteViewingRounds(days, startDate) {
     generatedCount: generated.length,
     existingCount: existing.length,
     failedCount: failed.length,
+    reserveTakeoverCount: generated.filter((item) => item.generationMode === 'reserve').length,
     generated,
     existing,
     failed
@@ -2019,17 +2188,32 @@ async function handleApi(req, res, pathname, searchParams) {
     return;
   }
 
+  if (req.method === 'POST' && pathname === '/api/remote-viewing/reserve/frontload') {
+    const auth = requireAuth(req, res);
+    if (!auth) {
+      return;
+    }
+
+    const body = await parseJsonBody(req);
+    const targetAvailable = clampNumber(Number(body.targetAvailable) || 30, 1, 120);
+    const result = await frontloadRemoteViewingReserveItems(targetAvailable);
+    sendJson(res, 200, result);
+    return;
+  }
+
   if (req.method === 'POST' && pathname === '/api/remote-viewing/predictions') {
     const auth = requireAuth(req, res);
     if (!auth) {
       return;
     }
 
-    if (!isRemoteViewingReady()) {
+    const reserve = reserveInventorySummary();
+    const existingTodayRound = getRoundByDate(dateKeyUtc());
+    if (!isRemoteViewingReady() && reserve.available === 0 && !existingTodayRound) {
       sendError(
         res,
         503,
-        'No usable provider chain. Configure ANTHROPIC_API_KEY and OPENROUTER_API_KEY (or OPENAI_API_KEY).'
+        'No usable provider chain and no reserve images are available. Configure providers or refill reserve pool.'
       );
       return;
     }
@@ -2584,6 +2768,8 @@ server.listen(PORT, HOST, () => {
   console.log(
     `Remote viewing failover image chain: ${order.image.length ? order.image.join(' -> ') : 'none configured'}`
   );
+  const reserve = reserveInventorySummary();
+  console.log(`Remote viewing reserve inventory: ${reserve.available}/${reserve.total} available`);
   console.log(
     `X auto-post: ${X_AUTOPOST_ENABLED ? 'enabled' : 'disabled'} | credentials: ${
       hasXCredentials() ? 'present' : 'missing'
