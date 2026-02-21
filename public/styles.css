@@ -1,19 +1,19 @@
 :root {
-  --bg: #080d12;
-  --bg-alt: #141d27;
-  --paper: #1a2430;
-  --paper-strong: #222d3a;
-  --line: #42556c;
-  --line-strong: #78a6cc;
-  --ink: #f5f9ff;
-  --ink-soft: #c9d5e4;
-  --tenant-brand: #7cc4ff;
-  --tenant-accent: #91ff6a;
-  --tenant-glow: rgba(145, 255, 106, 0.2);
-  --danger: #ff6a93;
-  --ok: #75ffbe;
-  --shadow-soft: 0 18px 34px rgba(1, 4, 8, 0.44);
-  --shadow-card: 0 14px 30px rgba(1, 4, 8, 0.4);
+  --bg: #dce2e8;
+  --bg-alt: #cbd3dc;
+  --paper: #edf2f7;
+  --paper-strong: #e1e8f0;
+  --line: #95a5b6;
+  --line-strong: #6d8498;
+  --ink: #172531;
+  --ink-soft: #415464;
+  --tenant-brand: #3f77a2;
+  --tenant-accent: #6da85a;
+  --tenant-glow: rgba(63, 119, 162, 0.2);
+  --danger: #b22d4b;
+  --ok: #2d7a40;
+  --shadow-soft: 0 12px 24px rgba(41, 56, 71, 0.16);
+  --shadow-card: 0 10px 20px rgba(41, 56, 71, 0.14);
   --radius-lg: 20px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -38,23 +38,28 @@ body {
   font-family: 'Space Grotesk', sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at 12% -14%, rgba(124, 196, 255, 0.3), transparent 40%),
-    radial-gradient(circle at 92% 8%, rgba(145, 255, 106, 0.13), transparent 38%),
-    linear-gradient(164deg, #080d12, #141d27 58%, #1a2531);
+    radial-gradient(circle at 14% -10%, rgba(167, 186, 203, 0.54), transparent 42%),
+    radial-gradient(circle at 88% 8%, rgba(186, 201, 214, 0.5), transparent 36%),
+    repeating-linear-gradient(
+      150deg,
+      rgba(255, 255, 255, 0.08) 0 2px,
+      transparent 2px 18px
+    ),
+    linear-gradient(162deg, #dce2e8, #cbd3dc 58%, #bfc9d3);
   background-attachment: fixed;
   transition: background 0.75s ease;
 }
 
 body.ship-interior {
   background:
-    radial-gradient(circle at 50% -16%, rgba(168, 197, 222, 0.24), transparent 54%),
-    radial-gradient(circle at 18% 108%, rgba(145, 255, 106, 0.14), transparent 36%),
+    radial-gradient(circle at 52% -18%, rgba(188, 203, 217, 0.52), transparent 56%),
+    radial-gradient(circle at 16% 104%, rgba(152, 173, 191, 0.3), transparent 38%),
     repeating-linear-gradient(
       160deg,
-      rgba(255, 255, 255, 0.03) 0 2px,
-      transparent 2px 18px
+      rgba(255, 255, 255, 0.1) 0 2px,
+      transparent 2px 17px
     ),
-    linear-gradient(165deg, #0a1117, #141d27 52%, #1e2a37);
+    linear-gradient(166deg, #e4e9ee, #ccd4dd 52%, #c0cad4);
 }
 
 .skip-link {
@@ -1579,6 +1584,154 @@ textarea {
 .reveal-block.visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+/* Daylight cockpit readability pass */
+.top-bar {
+  border-bottom-color: #a8b5c2;
+  background: rgba(229, 236, 243, 0.9);
+}
+
+.brand-copy strong,
+.brand-copy small,
+#auth-user,
+.field-label,
+.primary-nav a {
+  color: #1f3343;
+}
+
+.primary-nav a:hover,
+.primary-nav a:focus-visible {
+  border-color: #6d8498;
+  color: #12202b;
+  background: rgba(180, 195, 210, 0.5);
+}
+
+#tenant-select,
+#sort-select,
+.stack-form input,
+.stack-form textarea,
+.stack-form select,
+.post-form input,
+.post-form textarea,
+.post-form select,
+.comment-form input {
+  border-color: #8ea1b3;
+  background: #f4f7fa;
+  color: #14232e;
+}
+
+.auth-shell {
+  border-color: #8ea1b3;
+  background: rgba(240, 245, 250, 0.92);
+}
+
+.panel,
+.feed-card,
+.rv-card,
+.rv-record,
+.case-card,
+.room-card,
+.comment-item,
+.investigator-list li,
+.tenant-button,
+.channel-list li,
+.rules-list li,
+.toolbar,
+.onboarding-card,
+.hero-stats article,
+.empty-state {
+  border-color: #9eadbc;
+  background: linear-gradient(168deg, #eef3f8, #e1e8ef);
+}
+
+.hero,
+.remote-viewing {
+  background:
+    radial-gradient(circle at 88% 8%, rgba(159, 181, 200, 0.32), transparent 34%),
+    radial-gradient(circle at 8% 94%, rgba(164, 181, 197, 0.26), transparent 32%),
+    linear-gradient(162deg, #e9eff5, #dae3eb 62%, #d2dce6);
+}
+
+.hero h1,
+.rv-card h3,
+.rv-record h3,
+.panel h2,
+.feed-card h3,
+.feed-head h2 {
+  color: #1a2b38;
+}
+
+.hero-description,
+.rv-engine-note,
+.rv-meta,
+.rv-prompt,
+.rv-record p,
+.rv-leaderboard,
+.onboarding-steps li,
+.onboarding-steps span,
+.feed-card p,
+.post-author,
+.card-tags span,
+.meta-line,
+.comment-item p,
+.comment-meta,
+.site-footer p,
+.hot-tags span,
+.case-card p,
+.room-card p,
+.tenant-button span,
+.tenant-button small {
+  color: #33495b;
+}
+
+.form-feedback {
+  color: #1f4c70;
+}
+
+.form-feedback.error {
+  color: #9d243f;
+}
+
+.form-feedback.success {
+  color: #296f3a;
+}
+
+.type-pill {
+  background: rgba(63, 119, 162, 0.14);
+  color: #244766;
+}
+
+.status-pill {
+  background: rgba(109, 168, 90, 0.17);
+  color: #2d5d24;
+}
+
+.card-tags span,
+.hot-tags span {
+  border-color: #a3b2c0;
+  background: #e8edf3;
+}
+
+.upvote-btn,
+.comment-form button,
+.checklist button {
+  border-color: #8fa1b3;
+  background: #e7edf4;
+  color: #1c3243;
+}
+
+.btn-outline,
+.btn-quiet {
+  color: #183143;
+  border-color: #6f879d;
+  background: #e3ebf3;
+}
+
+.btn-primary {
+  color: #f8fbff;
+  background: linear-gradient(130deg, #4f7da5, #79b468);
+  box-shadow: 0 8px 16px rgba(79, 125, 165, 0.22);
 }
 
 @media (max-width: 1190px) {

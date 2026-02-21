@@ -2962,8 +2962,17 @@ async function handleApi(req, res, pathname, searchParams) {
     const password = String(body.password || '');
 
     const user = store.users.find((entry) => entry.email === email);
-    if (!user || !verifyPassword(password, user.passwordHash)) {
-      sendError(res, 401, 'Invalid email or password');
+    if (!user) {
+      sendError(
+        res,
+        404,
+        'No account found for this email. Create account first, or check if your deployment data was reset.'
+      );
+      return;
+    }
+
+    if (!verifyPassword(password, user.passwordHash)) {
+      sendError(res, 401, 'Incorrect password');
       return;
     }
 

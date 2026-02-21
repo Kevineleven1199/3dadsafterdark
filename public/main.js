@@ -1132,7 +1132,18 @@ async function handleLoginSubmit(event) {
     renderAuth();
     await withRefresh(async () => {}, null);
   } catch (error) {
-    setFeedback(nodes.authFeedback, error.message, 'error');
+    const message =
+      error.status === 404
+        ? `${error.message} Use Create Account below if this is your first login on this deployment.`
+        : error.message;
+    setFeedback(nodes.authFeedback, message, 'error');
+
+    if (error.status === 404 && nodes.registerForm) {
+      const registerEmail = nodes.registerForm.querySelector('input[name="email"]');
+      if (registerEmail && !String(registerEmail.value || '').trim()) {
+        registerEmail.value = email;
+      }
+    }
   }
 }
 
